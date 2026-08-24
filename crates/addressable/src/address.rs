@@ -15,6 +15,10 @@ use core::{
 use crate::{Revision, SpaceId};
 
 /// One validated address segment.
+///
+/// [`AbsoluteAddress`] and [`RelativeAddress`] parsing create names for callers.
+/// Hosts that already have structured segments can validate them with
+/// [`Self::new`] and pass them to the corresponding `from_names` constructor.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Name(Box<str>);
 
@@ -64,6 +68,10 @@ pub enum NameError {
 }
 
 /// A normalized, structured absolute address in typed space `S`.
+///
+/// Callers normally obtain one with [`Self::parse`], then place it in an exact
+/// [`Locator`] or use it as the base of a relative locator. Hosts retain the
+/// canonical address in each resolved [`Location`](crate::Location).
 pub struct AbsoluteAddress<S> {
     segments: Box<[Name]>,
     marker: PhantomData<fn() -> S>,
@@ -226,6 +234,10 @@ impl<S> fmt::Display for AbsoluteAddress<S> {
 }
 
 /// A normalized structured address relative to an explicit base.
+///
+/// Obtain one with [`Self::parse`] or [`AbsoluteAddress::relative_to`]. Resolve
+/// it directly with [`AbsoluteAddress::join`] or preserve the recipe in
+/// [`Locator::relative`].
 pub struct RelativeAddress<S> {
     upward: u32,
     segments: Box<[Name]>,
@@ -393,6 +405,29 @@ pub enum LocatorKind<S> {
 }
 
 /// A view-qualified resolution recipe in one runtime space instance.
+///
+/// Callers construct locators and pass them to a domain host's resolution API.
+/// Successful resolution normally produces a [`Location`](crate::Location).
+/// Exact and relative locators both retain their structured form and can be
+/// serialized when `V` implements [`core::fmt::Display`].
+///
+/// ```
+/// use addressable::{AbsoluteAddress, Locator, RelativeAddress, SpaceId};
+///
+/// enum Space {}
+/// #[derive(Clone, Copy)]
+/// enum View { Assembly }
+///
+/// let space = SpaceId::<Space>::new(7);
+/// let locator = Locator::relative(
+///     space,
+///     View::Assembly,
+///     AbsoluteAddress::parse("/basilica/nave")?,
+///     RelativeAddress::parse("../transept")?,
+/// );
+/// assert_eq!(locator.to_absolute()?.to_string(), "/basilica/transept");
+/// # Ok::<(), addressable::AddressError>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Locator<S, V> {
     space: SpaceId<S>,
@@ -517,6 +552,14 @@ pub enum LocatorParseError<E> {
 }
 
 /// A locator pinned to expected semantic identity and revision.
+///
+/// Create a pin from a successfully resolved location when later resolution
+/// must not silently accept staleness, movement, or rebinding. A domain host's
+/// pinned-resolution API interprets the preconditions and returns a rich
+/// [`Resolution`](crate::Resolution) outcome.
+/// Use the original locator, the returned [`Location::referent`](crate::Location::referent),
+/// and its [`Location::revision`](crate::Location::revision) together; mixing
+/// observations from different resolutions defeats the pin's meaning.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Pinned<S, V, I> {
     locator: Locator<S, V>,
@@ -526,6 +569,10 @@ pub struct Pinned<S, V, I> {
 
 impl<S, V, I> Pinned<S, V, I> {
     /// Pins a locator to identity observed at `expected_revision`.
+    ///
+    /// The locator, identity, and revision must come from one successful
+    /// resolution. Addressable stores that evidence; the resolving host checks
+    /// it when the pin is used.
     #[must_use]
     pub const fn new(
         locator: Locator<S, V>,

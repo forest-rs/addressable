@@ -16,7 +16,8 @@ use crate::AbsoluteAddress;
 ///
 /// The marker `S` prevents ids from unrelated domain types from being mixed.
 /// Values are assigned by the host; Addressable does not require a global id
-/// generator or atomics.
+/// generator or atomics. Hosts place the id in locators and revisions; callers
+/// normally obtain it from a domain host rather than inventing it.
 pub struct SpaceId<S> {
     raw: u64,
     marker: PhantomData<fn() -> S>,
@@ -82,7 +83,9 @@ impl<S> SpaceId<S> {
 /// Monotonic revision scoped to one typed address-space instance.
 ///
 /// Keeping the [`SpaceId`] inside the value prevents equal numeric counters
-/// from unrelated space instances from comparing as the same revision.
+/// from unrelated space instances from comparing as the same revision. A host
+/// creates and advances revisions, returns them in contextual results, and
+/// validates them when callers submit pins, guards, transactions, or deltas.
 pub struct Revision<S> {
     space: SpaceId<S>,
     sequence: u64,
@@ -172,6 +175,11 @@ impl<S> Revision<S> {
 /// `R` is durable referent identity and `O` is contextual occurrence identity.
 /// The two are intentionally stored separately even when a domain happens to
 /// use the same representation for both.
+///
+/// A host normally produces a location while resolving a
+/// [`Locator`](crate::Locator) or executing a [`Query`](crate::Query). Callers
+/// inspect its context, retain its durable identities, or combine it with a
+/// typed facet using [`Endpoint`].
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Location<S, V, R, O> {
     view: V,
@@ -182,7 +190,7 @@ pub struct Location<S, V, R, O> {
 }
 
 impl<S, V, R, O> Location<S, V, R, O> {
-    /// Creates resolved occurrence context.
+    /// Creates resolved occurrence context on behalf of a domain host.
     #[must_use]
     pub const fn new(
         view: V,
@@ -250,6 +258,11 @@ impl<S, V, R, O> Location<S, V, R, O> {
 }
 
 /// A resolved referent value paired with the context through which it was found.
+///
+/// A host can use this as the return type of a read that yields the referent
+/// value itself but must not discard the location, revision, view, or occurrence
+/// through which it was obtained. Addressable does not produce this pair
+/// automatically; a host chooses it when that return shape matches its API.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Located<T, L> {
     referent: T,
@@ -257,7 +270,7 @@ pub struct Located<T, L> {
 }
 
 impl<T, L> Located<T, L> {
-    /// Pairs a referent value with its resolved location.
+    /// Pairs a referent value with its resolved location on behalf of a host.
     #[must_use]
     pub const fn new(referent: T, location: L) -> Self {
         Self { referent, location }
@@ -283,6 +296,11 @@ impl<T, L> Located<T, L> {
 }
 
 /// A typed addressable facet on a located owner.
+///
+/// Callers normally create an endpoint from a host-produced [`Location`] and a
+/// domain-defined facet marker, then pass it to a matching host read, explain,
+/// or edit API. The facet type prevents unrelated values from being read or
+/// written through the same owner by accident.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Endpoint<L, F> {
     owner: L,
@@ -320,6 +338,11 @@ impl<L, F> Endpoint<L, F> {
 /// `H` may be an arena slot, generational handle, interned id, or another
 /// runtime accelerator. This wrapper carries context but intentionally has no
 /// textual serialization API.
+///
+/// A domain may produce this from a validated [`Location`] and accept it in
+/// host-specific fast paths. Callers must reacquire it after the host revision
+/// changes. Addressable itself defines no operation on `H` and deliberately
+/// provides no persistence or automatic freshness check for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ResolvedHandle<S, H> {
     revision: Revision<S>,
@@ -327,7 +350,7 @@ pub struct ResolvedHandle<S, H> {
 }
 
 impl<S, H> ResolvedHandle<S, H> {
-    /// Creates a revision-scoped resolved handle.
+    /// Wraps a host-local handle at the revision where the host resolved it.
     #[must_use]
     pub const fn new(revision: Revision<S>, handle: H) -> Self {
         Self { revision, handle }

@@ -6,6 +6,10 @@
 use alloc::{boxed::Box, vec::Vec};
 
 /// One correspondence target and the evidence for that mapping.
+///
+/// Hosts construct these inside a [`Correspondence`]; callers inspect the
+/// destination with [`Self::target`] and the mapping evidence with
+/// [`Self::provenance`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CorrespondenceTarget<T, P> {
     target: T,
@@ -13,7 +17,7 @@ pub struct CorrespondenceTarget<T, P> {
 }
 
 impl<T, P> CorrespondenceTarget<T, P> {
-    /// Creates one evidence-bearing target.
+    /// Creates one evidence-bearing target on behalf of a mapping host.
     #[must_use]
     pub const fn new(target: T, provenance: P) -> Self {
         Self { target, provenance }
@@ -33,6 +37,25 @@ impl<T, P> CorrespondenceTarget<T, P> {
 }
 
 /// A partial, possibly one-to-many mapping from one source value.
+///
+/// A domain host normally produces a correspondence when mapping between two
+/// object spaces. Callers must handle zero, one, or several targets and can
+/// inspect the provenance attached to each target. [`Self::compose`] extends a
+/// mapping without discarding evidence from either leg.
+///
+/// ```
+/// use addressable::{Correspondence, CorrespondenceTarget};
+///
+/// let mapping = Correspondence::new(
+///     "shared-arch",
+///     [
+///         CorrespondenceTarget::new("north-result", "north occurrence"),
+///         CorrespondenceTarget::new("south-result", "south occurrence"),
+///     ],
+/// );
+/// assert!(mapping.is_ambiguous());
+/// assert_eq!(mapping.targets()[0].provenance(), &"north occurrence");
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Correspondence<F, T, P> {
     source: F,
@@ -40,7 +63,7 @@ pub struct Correspondence<F, T, P> {
 }
 
 impl<F, T, P> Correspondence<F, T, P> {
-    /// Creates a correspondence, including an empty partial result.
+    /// Creates a correspondence on behalf of a host, including an empty result.
     #[must_use]
     pub fn new(source: F, targets: impl IntoIterator<Item = CorrespondenceTarget<T, P>>) -> Self {
         Self {
@@ -110,6 +133,10 @@ impl<F, T, P> Correspondence<F, T, P> {
 }
 
 /// Evidence retained from both legs of correspondence composition.
+///
+/// [`Correspondence::compose`] produces this for each composed target. Callers
+/// inspect [`Self::first`] and [`Self::second`] when auditing the complete
+/// mapping route.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComposedEvidence<A, B> {
     first: A,

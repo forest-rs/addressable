@@ -60,16 +60,24 @@ impl CatalogOccurrenceId {
 }
 
 /// Resolved catalog result occurrence.
+///
+/// Produced by [`Catalog::resolve`] or as a target of
+/// [`Basilica::correspond_to_catalog`].
 pub type CatalogLocation = Location<CatalogSpace, CatalogView, CatalogEntryId, CatalogOccurrenceId>;
 
-/// View-qualified catalog locator.
+/// View-qualified catalog locator accepted by [`Catalog::resolve`].
 pub type CatalogLocator = Locator<CatalogSpace, CatalogView>;
 
-/// Rich catalog resolution outcome.
+/// Rich catalog resolution outcome produced by [`Catalog::resolve`].
 pub type CatalogResolution =
     Resolution<CatalogSpace, CatalogLocation, CatalogEntryId, AbsoluteAddress<CatalogSpace>>;
 
 /// Provenance for one basilica-to-catalog mapping.
+///
+/// Obtain this from the targets returned by
+/// [`Basilica::correspond_to_catalog`]. It records both the source basilica
+/// instance and the particular assembly occurrence that produced a ranked
+/// catalog result.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct CatalogEvidence {
     source_space: SpaceId<BasilicaSpace>,
@@ -107,6 +115,10 @@ struct CatalogEntry {
 }
 
 /// Deterministic second address space containing ranked basilica results.
+///
+/// Use [`Self::resolve`] for catalog-native addresses or
+/// [`Basilica::correspond_to_catalog`] to map a basilica referent into ranked
+/// catalog occurrences with evidence.
 #[derive(Clone, Debug)]
 pub struct Catalog {
     id: SpaceId<CatalogSpace>,
@@ -171,6 +183,27 @@ impl Catalog {
 
 impl Basilica {
     /// Maps one semantic basilica feature into zero or more catalog result occurrences.
+    ///
+    /// The result is deliberately zero-to-many. Inspect each target's
+    /// [`CatalogEvidence`] rather than assuming the first occurrence is unique.
+    ///
+    /// ```
+    /// use addressable::SpaceId;
+    /// use addressable_reference::{
+    ///     Basilica, BasilicaSpace, Catalog, CatalogSpace, FeatureId,
+    /// };
+    ///
+    /// let basilica = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+    /// let catalog = Catalog::new(SpaceId::<CatalogSpace>::new(2));
+    /// let mapping = basilica.correspond_to_catalog(FeatureId::new(3), &catalog);
+    ///
+    /// assert!(mapping.is_ambiguous());
+    /// assert_eq!(mapping.targets().len(), 2);
+    /// assert_ne!(
+    ///     mapping.targets()[0].provenance().source_occurrence(),
+    ///     mapping.targets()[1].provenance().source_occurrence(),
+    /// );
+    /// ```
     #[must_use]
     pub fn correspond_to_catalog(
         &self,

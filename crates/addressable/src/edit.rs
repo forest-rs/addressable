@@ -8,6 +8,16 @@ use alloc::vec::Vec;
 use crate::Revision;
 
 /// Preconditions required before applying an addressed mutation.
+///
+/// A caller forms a guard after selecting and reading a target. All four fields
+/// must describe that same observation: the resolved semantic referent, the
+/// revision that governed selection and reading, the value or fingerprint then
+/// read, and any capability required by the domain operation.
+///
+/// A guard does not identify an endpoint or perform a mutation. A domain
+/// operation pairs it with its endpoint and proposed value, a [`Transaction`]
+/// carries one or more operations, and the receiving host validates every
+/// precondition at submission. A guard is evidence, not a lock.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Guard<S, I, V, C = ()> {
     expected_referent: I,
@@ -17,7 +27,10 @@ pub struct Guard<S, I, V, C = ()> {
 }
 
 impl<S, I, V> Guard<S, I, V, ()> {
-    /// Creates an identity, revision, and value guard with no extra capability token.
+    /// Creates a guard for a domain that requires no separate capability token.
+    ///
+    /// This omits only the capability token; the host must still validate the
+    /// referent, revision, and observed value.
     #[must_use]
     pub const fn at(
         expected_referent: I,
@@ -29,7 +42,7 @@ impl<S, I, V> Guard<S, I, V, ()> {
 }
 
 impl<S, I, V, C> Guard<S, I, V, C> {
-    /// Creates a complete guarded-mutation precondition.
+    /// Creates a guarded-mutation precondition from one coherent observation.
     #[must_use]
     pub const fn new(
         expected_referent: I,
@@ -71,6 +84,9 @@ impl<S, I, V, C> Guard<S, I, V, C> {
 }
 
 /// Whether a transaction is previewed or committed.
+///
+/// Selected by [`Transaction::dry_run`] or [`Transaction::apply`] and returned
+/// in domain transaction reports.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TransactionMode {
     /// Validate and report impact without changing state.
@@ -80,6 +96,9 @@ pub enum TransactionMode {
 }
 
 /// Behavior when one operation in a transaction conflicts.
+///
+/// Read this from [`Transaction::failure_policy`]. Addressable currently
+/// exposes only all-or-nothing execution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FailurePolicy {
     /// No operation is observable unless every operation validates.
@@ -87,6 +106,15 @@ pub enum FailurePolicy {
 }
 
 /// A snapshot-scoped collection of typed operations.
+///
+/// Build operations from guarded endpoints, then choose [`Self::dry_run`] or
+/// [`Self::apply`] using the revision at which the target set was selected.
+/// Operations should retain their own target and [`Guard`]; `O` remains typed
+/// so each host can define the mutations it supports.
+///
+/// Addressable packages the request but does not execute it. The receiving
+/// host validates the transaction, enforces [`FailurePolicy::Atomic`], and
+/// defines its typed success report and conflict errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Transaction<S, O> {
     selection_revision: Revision<S>,

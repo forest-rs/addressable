@@ -2,11 +2,10 @@
 
 ## Current state
 
-The complete initial vertical slice was implemented on 2026-08-24 on branch
-`codex/bootstrap-addressable`. The branch has been pushed for review; it has
-not been merged, tagged, or published.
+The complete initial vertical slice landed on `main` on 2026-08-24. No crate
+has been tagged or published.
 
-The workspace contains four underscore-named packages:
+The workspace contains four packages:
 
 - `addressable`: dependency-free, always `no_std + alloc` semantic vocabulary;
 - `addressable_reference`: a `std` scanning basilica host and second catalog
@@ -44,14 +43,21 @@ architecture:
 8. One arch referent maps to two independently addressable catalog results while
    retaining correspondence evidence.
 9. The dynamic adapter declares its view/facet/value schema, reconstructs typed
-   endpoints and guards, and delegates to the same transaction method. Typed and
-   dynamic operation equivalence is tested, including undo data.
+   endpoints and guards, and delegates to the same transaction method. A read
+   returns the space and revision needed to form its guard without reaching
+   around the adapter. Typed and dynamic operation equivalence is tested,
+   including undo data.
 
 The tour runs all nine points through public APIs:
 
 ```sh
 cargo run -p addressable_tour --locked
 ```
+
+The public rustdoc now describes the lifecycle of caller-created and
+host-produced types, links each pivotal result to its producing and consuming
+operations, and reserves doctests for real workflows and static laws. The tour
+presents the same lifecycle as five narrated chapters.
 
 ## Deliberately simple execution
 
@@ -89,7 +95,7 @@ cargo +1.88 check -p addressable --locked --target x86_64-unknown-none
 cargo run -p addressable_tour --locked
 ```
 
-Results: 23 unit tests and 4 doctests pass; strict Clippy and warning-denied
+Results: 26 unit tests and 16 doctests pass; strict Clippy and warning-denied
 rustdoc pass; native stable, Rust 1.88, bare-metal `no_std`, and WebAssembly
 core checks pass; repository formatting, typo, SPDX-header, and whitespace
 checks pass.

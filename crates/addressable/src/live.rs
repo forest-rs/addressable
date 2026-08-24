@@ -17,6 +17,8 @@ use crate::Revision;
 ///
 /// The id is interpreted together with the space carried by a [`Revision`].
 /// Addressable does not prescribe allocation or require atomics.
+/// Live-query hosts create and retain it; consumers receive it through
+/// [`QuerySnapshot::live_query`] and [`QueryDelta::live_query`].
 pub struct LiveQueryId<S> {
     raw: u64,
     marker: PhantomData<fn() -> S>,
@@ -83,6 +85,9 @@ impl<S> LiveQueryId<S> {
 }
 
 /// Identity used to track live result entries.
+///
+/// A live-query host records this in snapshots and deltas according to the
+/// query's deduplication contract. Consumers inspect it before replay.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResultIdentity {
     /// Contextual occurrence identity.
@@ -94,6 +99,9 @@ pub enum ResultIdentity {
 }
 
 /// One stable live-query result entry.
+///
+/// Live-query hosts construct entries; consumers use [`Self::key`] to track
+/// stable identity and [`Self::value`] for the current located result.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ResultEntry<K, T> {
     key: K,
@@ -101,7 +109,7 @@ pub struct ResultEntry<K, T> {
 }
 
 impl<K, T> ResultEntry<K, T> {
-    /// Creates a keyed result entry.
+    /// Creates a keyed result entry on behalf of a live-query host.
     #[must_use]
     pub const fn new(key: K, value: T) -> Self {
         Self { key, value }
@@ -121,6 +129,40 @@ impl<K, T> ResultEntry<K, T> {
 }
 
 /// A complete live-query result at one revision.
+///
+/// A live-query host produces an initial snapshot and subsequent
+/// [`QueryDelta`] values. Consumers retain the snapshot and call
+/// [`Self::apply`] for each delta in order. Replay is atomic: an invalid delta
+/// leaves the snapshot unchanged.
+///
+/// ```
+/// use addressable::{
+///     LiveQueryId, QueryDelta, QuerySnapshot, ResultEntry, ResultIdentity,
+///     Revision, SpaceId,
+/// };
+///
+/// #[derive(Debug, PartialEq, Eq)]
+/// enum Space {}
+/// let space = SpaceId::<Space>::new(1);
+/// let stream = LiveQueryId::new(9);
+/// let mut current = QuerySnapshot::new(
+///     stream,
+///     Revision::new(space, 3),
+///     ResultIdentity::Entry,
+///     [ResultEntry::new("north", 120_i64)],
+/// );
+/// let next = QuerySnapshot::new(
+///     stream,
+///     Revision::new(space, 4),
+///     ResultIdentity::Entry,
+///     [ResultEntry::new("north", 80_i64)],
+/// );
+/// let delta = QueryDelta::between(&current, &next)?;
+/// current.apply(&delta)?;
+///
+/// assert_eq!(current, next);
+/// # Ok::<(), addressable::DeltaError<Space>>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QuerySnapshot<S, K, T> {
     live_query: LiveQueryId<S>,
@@ -130,7 +172,7 @@ pub struct QuerySnapshot<S, K, T> {
 }
 
 impl<S, K, T> QuerySnapshot<S, K, T> {
-    /// Creates a complete snapshot.
+    /// Creates a complete snapshot on behalf of a live-query host.
     #[must_use]
     pub fn new(
         live_query: LiveQueryId<S>,
@@ -258,6 +300,9 @@ where
 }
 
 /// One replayable structural change in a live query.
+///
+/// Hosts emit these through [`QueryDelta::changes`]. Consumers can render the
+/// individual events or replay the whole delta with [`QuerySnapshot::apply`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QueryChange<K, T> {
     /// Insert a new entry at an ordered index.
@@ -304,6 +349,9 @@ pub enum QueryChange<K, T> {
 }
 
 /// A coherent revision-to-revision live-query delta.
+///
+/// Hosts emit deltas in revision order. Consumers inspect [`Self::changes`] or
+/// replay the complete transition with [`QuerySnapshot::apply`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryDelta<S, K, T> {
     live_query: LiveQueryId<S>,
@@ -314,7 +362,7 @@ pub struct QueryDelta<S, K, T> {
 }
 
 impl<S, K, T> QueryDelta<S, K, T> {
-    /// Creates a delta from already ordered structural changes.
+    /// Creates a delta from ordered structural changes on behalf of a host.
     #[must_use]
     pub fn new(
         live_query: LiveQueryId<S>,
@@ -469,6 +517,9 @@ fn ensure_unique<S, K: Eq, T>(entries: &[ResultEntry<K, T>]) -> Result<(), Delta
 }
 
 /// Failure to construct or atomically replay a live delta.
+///
+/// Returned by [`QueryDelta::between`] and [`QuerySnapshot::apply`]. On replay
+/// failure, the destination snapshot remains unchanged.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DeltaError<S> {
     /// Snapshot and delta belong to different live queries.

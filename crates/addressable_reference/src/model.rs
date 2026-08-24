@@ -78,6 +78,11 @@ impl EdgeId {
 }
 
 /// Runtime-local dense feature slot.
+///
+/// [`Basilica::resolved_handle`](crate::Basilica::resolved_handle) produces
+/// this inside a revision-scoped [`ResolvedHandle`](addressable::ResolvedHandle).
+/// The scanning reference exposes the boundary for inspection but has no
+/// slot-based read operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct SlotHandle(u32);
 
@@ -175,23 +180,50 @@ pub enum BasilicaPredicate {
 }
 
 /// Resolved occurrence type for the basilica space.
+///
+/// Normally produced by [`Basilica::resolve`](crate::Basilica::resolve) or the
+/// `query_*` methods. Pair a location with [`Load`] to call
+/// [`Basilica::read_load`](crate::Basilica::read_load), or pass it to
+/// [`Basilica::resolved_handle`](crate::Basilica::resolved_handle) for a
+/// revision-scoped runtime accelerator.
 pub type BasilicaLocation = Location<BasilicaSpace, BasilicaView, FeatureId, OccurrenceId>;
 
 /// View-qualified locator type for the basilica space.
+///
+/// Obtain the root from [`Basilica::root_locator`](crate::Basilica::root_locator)
+/// or construct an exact or relative [`Locator`]. Pass it to
+/// [`Basilica::resolve`](crate::Basilica::resolve), pin it, or use it as a
+/// [`Query`] start.
 pub type BasilicaLocator = Locator<BasilicaSpace, BasilicaView>;
 
-/// Rich resolution outcome for a basilica occurrence.
+/// Rich resolution outcome produced by basilica resolution.
+///
+/// Match every outcome when resolving pins; [`Resolution::resolved`] is a
+/// convenience only when all exceptional outcomes can be treated alike.
 pub type BasilicaResolution =
     Resolution<BasilicaSpace, BasilicaLocation, FeatureId, AbsoluteAddress<BasilicaSpace>>;
 
 /// Typed basilica query, defaulting to many-result cardinality.
+///
+/// Construct it through [`Query::many`], [`Query::one`], or
+/// [`Query::optional`], then execute it with the corresponding `Basilica`
+/// method. Many-result queries can also be passed to
+/// [`Basilica::watch`](crate::Basilica::watch).
 pub type BasilicaQuery<C = Many> = Query<BasilicaLocator, BasilicaAxis, BasilicaPredicate, C>;
 
 /// Marker for the typed effective-load endpoint.
+///
+/// Combine this marker with a [`BasilicaLocation`] using
+/// [`Endpoint::new`](addressable::Endpoint::new). The resulting endpoint is
+/// accepted by [`Basilica::read_load`](crate::Basilica::read_load) and
+/// [`SetLoad::new`](crate::SetLoad::new).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
 pub struct Load;
 
 /// Capability required to change a load endpoint.
+///
+/// Place [`Self::SetLoad`] in the [`Guard`](addressable::Guard) carried by a
+/// [`SetLoad`](crate::SetLoad) operation.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum EditCapability {
     /// Author an effective load opinion.
@@ -199,6 +231,9 @@ pub enum EditCapability {
 }
 
 /// Domain-owned provenance for one load opinion.
+///
+/// Obtain this through the opinions returned by
+/// [`Basilica::read_load`](crate::Basilica::read_load).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LoadProvenance {
     /// Explicitly authored load.
@@ -214,6 +249,9 @@ pub enum LoadProvenance {
 }
 
 /// Domain-owned reason explaining the winning load opinion.
+///
+/// Obtain this from the explanation returned by
+/// [`Basilica::read_load`](crate::Basilica::read_load).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum LoadReason {
     /// The authored opinion has greater strength than the default.

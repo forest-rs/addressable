@@ -12,6 +12,48 @@ use crate::{
 };
 
 /// Typed operation that authors one effective load.
+///
+/// Construct this from a [`BasilicaLocation`] paired with [`Load`], the proposed
+/// value, and a guard derived from
+/// [`Basilica::read_load`](crate::Basilica::read_load). Submit it inside an
+/// [`Transaction`] to [`Basilica::transact`].
+///
+/// ```
+/// use addressable::{
+///     AbsoluteAddress, Endpoint, Guard, Locator, Resolution, SpaceId, Transaction,
+/// };
+/// use addressable_reference::{
+///     Basilica, BasilicaSpace, BasilicaView, EditCapability, Load, SetLoad,
+/// };
+///
+/// let mut space = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+/// let locator = Locator::exact(
+///     space.id(),
+///     BasilicaView::Assembly,
+///     AbsoluteAddress::parse("/basilica/nave/north_arch").expect("valid address"),
+/// );
+/// let Resolution::Resolved(arch) = space.resolve(&locator) else {
+///     panic!("north arch must resolve");
+/// };
+/// let endpoint = Endpoint::new(arch.clone(), Load);
+/// let explained = space.read_load(&endpoint).expect("load reads");
+/// let edit = SetLoad::new(
+///     endpoint,
+///     50,
+///     Guard::new(
+///         *arch.referent(),
+///         arch.revision(),
+///         *explained.value(),
+///         EditCapability::SetLoad,
+///     ),
+/// );
+/// let report = space
+///     .transact(Transaction::apply(arch.revision(), [edit]))
+///     .expect("guarded edit applies");
+///
+/// assert_eq!(report.changes()[0].current(), 50);
+/// assert_eq!(space.revision(), report.revision_after());
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SetLoad {
     endpoint: Endpoint<BasilicaLocation, Load>,
@@ -54,6 +96,9 @@ impl SetLoad {
 }
 
 /// One effective value change reported by a transaction.
+///
+/// Obtain these from [`TransactionReport::changes`] after a successful dry run
+/// or apply.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct LoadChange {
     referent: FeatureId,
@@ -82,6 +127,10 @@ impl LoadChange {
 }
 
 /// Undo information for one applied authored opinion.
+///
+/// Obtain these from [`TransactionReport::undo`]. A caller must still construct
+/// and submit a fresh guarded transaction; this record is not an executable
+/// command.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct UndoLoad {
     referent: FeatureId,
@@ -110,6 +159,10 @@ impl UndoLoad {
 }
 
 /// Successful dry-run or applied transaction report.
+///
+/// Produced by [`Basilica::transact`]. Inspect [`Self::changes`] for effective
+/// value changes and [`Self::undo`] for the authored state needed to build a
+/// separately guarded undo operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct TransactionReport {
     mode: TransactionMode,
@@ -151,7 +204,10 @@ impl TransactionReport {
     }
 }
 
-/// Atomic transaction conflict. No operation is observable when this is returned.
+/// Atomic transaction conflict returned by [`Basilica::transact`].
+///
+/// No operation is observable when any variant is returned. The operation
+/// index identifies the failing member of the caller-ordered transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum TransactionConflict {
     /// The bulk selection snapshot is no longer current.
@@ -218,6 +274,11 @@ struct PreparedLoad {
 
 impl Basilica {
     /// Atomically validates and previews or applies typed load operations.
+    ///
+    /// Every operation is validated before any operation becomes observable.
+    /// Build each guard from the value and revision actually read, rather than
+    /// from a locator alone. [`SetLoad`] shows the complete resolve, read,
+    /// guard, operation, and submission workflow.
     pub fn transact(
         &mut self,
         transaction: Transaction<BasilicaSpace, SetLoad>,
