@@ -6,6 +6,17 @@
 //! Erasure is deliberately confined to this crate. [`ReferenceTool`] validates
 //! schema names and dynamic value kinds, then reconstructs the same typed
 //! endpoint, guard, and transaction used by ordinary Rust callers.
+//!
+//! # Dynamic workflow
+//!
+//! 1. Inspect [`ReferenceTool::schema`] for accepted view, facet, value-kind,
+//!    and capability names.
+//! 2. Construct a [`DynamicEndpoint`] and pass it to [`ReferenceTool::read`].
+//! 3. Form a [`DynamicGuard`] directly from the returned
+//!    [`DynamicExplanation`], then submit a [`DynamicTransaction`].
+//!
+//! The complete example on [`ReferenceTool`] is a tooling-only call path: it
+//! never reaches around the adapter to recover typed state.
 
 use std::{string::String, vec::Vec};
 
@@ -19,6 +30,9 @@ use addressable_reference::{
 };
 
 /// Dynamic value kind declared by a tooling schema.
+///
+/// Read this from `FacetSchema::value_kind` or obtain it from
+/// [`DynamicValue::kind`] before constructing a request.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum DynamicKind {
     /// Signed 64-bit integer.
@@ -30,6 +44,8 @@ pub enum DynamicKind {
 /// Value crossing the schema-backed tooling boundary.
 ///
 /// This enum is not used by `addressable` or by typed reference storage.
+/// Callers construct values according to `FacetSchema::value_kind`; read and
+/// transaction reports return values in the same representation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DynamicValue {
     /// Signed 64-bit integer.
@@ -61,6 +77,9 @@ pub enum ToolCapability {
 }
 
 /// Schema for one named address-space view.
+///
+/// Returned as part of [`ReferenceTool::schema`]; tooling does not need to
+/// construct this reference adapter's schema itself.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ViewSchema {
     /// Stable dynamic name.
@@ -68,6 +87,9 @@ pub struct ViewSchema {
 }
 
 /// Schema for one addressable facet.
+///
+/// Returned as part of [`ReferenceTool::schema`]. Its name is accepted by
+/// `DynamicEndpoint::facet`, and its value kind governs reads and sets.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct FacetSchema {
     /// Stable dynamic name.
@@ -79,6 +101,9 @@ pub struct FacetSchema {
 }
 
 /// Declared dynamic schema for one typed object-space adapter.
+///
+/// Obtain this from [`ReferenceTool::schema`] before constructing locators or
+/// endpoint requests.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ObjectSpaceSchema {
     /// Stable schema identity.
@@ -110,6 +135,10 @@ const BASILICA_SCHEMA: ObjectSpaceSchema = ObjectSpaceSchema {
 };
 
 /// Erased but schema-qualified locator.
+///
+/// Construct this from a runtime space id plus view and address syntax declared
+/// by [`ObjectSpaceSchema`]. It becomes the owner of a [`DynamicEndpoint`] and
+/// is validated by [`ReferenceTool::read`] or [`ReferenceTool::transact`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicLocator {
     /// Runtime space id.
@@ -121,6 +150,10 @@ pub struct DynamicLocator {
 }
 
 /// Erased typed-facet endpoint.
+///
+/// Callers construct this from a [`DynamicLocator`] and a facet name from
+/// `ObjectSpaceSchema::facets`. Pass it to [`ReferenceTool::read`] or include
+/// it in a [`DynamicSet`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicEndpoint {
     /// Located owner recipe.
@@ -130,6 +163,10 @@ pub struct DynamicEndpoint {
 }
 
 /// Erased preconditions for one set operation.
+///
+/// Copy the referent, space, revision, and value from the
+/// [`DynamicExplanation`] returned by [`ReferenceTool::read`]. The adapter
+/// validates all four values before delegating to the typed transaction path.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicGuard {
     /// Expected durable semantic identity.
@@ -143,6 +180,9 @@ pub struct DynamicGuard {
 }
 
 /// One erased guarded set operation.
+///
+/// Combine a [`DynamicEndpoint`], a schema-compatible proposed value, and a
+/// [`DynamicGuard`], then include it in `DynamicTransaction::operations`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicSet {
     /// Addressed facet.
@@ -154,6 +194,9 @@ pub struct DynamicSet {
 }
 
 /// Snapshot-scoped dynamic transaction request.
+///
+/// Use the space and revision from the same [`DynamicExplanation`] that supplied
+/// each operation's guard. Submit the request to [`ReferenceTool::transact`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicTransaction {
     /// Runtime space in which the target set was selected.
@@ -167,6 +210,9 @@ pub struct DynamicTransaction {
 }
 
 /// One erased opinion in a structured explanation.
+///
+/// Produced inside `DynamicExplanation::opinions` by
+/// [`ReferenceTool::read`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicOpinion {
     /// Typed value after erasure.
@@ -178,10 +224,18 @@ pub struct DynamicOpinion {
 }
 
 /// Structured dynamic value explanation.
+///
+/// Produced by [`ReferenceTool::read`]. The subject, space, revision, and value
+/// are exactly the observation needed to construct a [`DynamicGuard`]; opinions
+/// and reason explain how the effective value was selected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicExplanation {
     /// Durable semantic subject identity.
     pub subject: u64,
+    /// Runtime space in which the value was observed.
+    pub space: u64,
+    /// Space-local revision at which the value was observed.
+    pub revision: u64,
     /// Effective value.
     pub value: DynamicValue,
     /// Candidate opinions in typed domain strength order.
@@ -192,7 +246,7 @@ pub struct DynamicExplanation {
     pub reason: &'static str,
 }
 
-/// One effective dynamic change.
+/// One effective dynamic change produced in a [`DynamicTransactionReport`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DynamicChange {
     /// Durable semantic subject identity.
@@ -203,7 +257,10 @@ pub struct DynamicChange {
     pub current: i64,
 }
 
-/// Dynamic transaction report produced from the typed report.
+/// Dynamic transaction report produced by [`ReferenceTool::transact`].
+///
+/// Inspect [`Self::changes`] for effective changes and [`Self::undo`] for the
+/// preconditions required by a future, separately guarded undo operation.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DynamicTransactionReport {
     /// Preview or apply mode.
@@ -219,6 +276,9 @@ pub struct DynamicTransactionReport {
 }
 
 /// Dynamic form of one typed authored-load undo record.
+///
+/// Returned in `DynamicTransactionReport::undo`; it is information for
+/// constructing a future guarded request, not an immediately executable token.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct DynamicUndo {
     /// Durable semantic subject identity.
@@ -230,6 +290,49 @@ pub struct DynamicUndo {
 }
 
 /// Schema-backed adapter around one typed basilica host.
+///
+/// This is the entry point for dynamic callers. Read an endpoint first, then
+/// derive every transaction precondition from that observation.
+///
+/// ```
+/// use addressable::{SpaceId, TransactionMode};
+/// use addressable_reference::{Basilica, BasilicaSpace};
+/// use addressable_tooling::{
+///     DynamicEndpoint, DynamicGuard, DynamicLocator, DynamicSet,
+///     DynamicTransaction, DynamicValue, ReferenceTool,
+/// };
+///
+/// let mut basilica = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+/// let mut tool = ReferenceTool::new(&mut basilica);
+/// let endpoint = DynamicEndpoint {
+///     owner: DynamicLocator {
+///         space: 1,
+///         view: "assembly".into(),
+///         address: "/basilica/nave/north_arch".into(),
+///     },
+///     facet: "load".into(),
+/// };
+/// let observed = tool.read(&endpoint).expect("dynamic read succeeds");
+/// let report = tool
+///     .transact(DynamicTransaction {
+///         selection_space: observed.space,
+///         selection_revision: observed.revision,
+///         mode: TransactionMode::Apply,
+///         operations: vec![DynamicSet {
+///             endpoint,
+///             value: DynamicValue::Integer(80),
+///             guard: DynamicGuard {
+///                 expected_referent: observed.subject,
+///                 expected_space: observed.space,
+///                 expected_revision: observed.revision,
+///                 expected_value: observed.value,
+///             },
+///         }],
+///     })
+///     .expect("guarded dynamic transaction applies");
+///
+/// assert_eq!(report.changes[0].current, 80);
+/// ```
 #[derive(Debug)]
 pub struct ReferenceTool<'a> {
     space: &'a mut Basilica,
@@ -249,12 +352,17 @@ impl<'a> ReferenceTool<'a> {
     }
 
     /// Reads and explains an endpoint after recovering its typed schema.
+    ///
+    /// The returned explanation carries every observation needed to form a
+    /// guarded set request against this value.
     pub fn read(&self, endpoint: &DynamicEndpoint) -> Result<DynamicExplanation, ToolError> {
         let endpoint = self.typed_endpoint(endpoint)?;
         let explained = self.space.read_load(&endpoint).map_err(ToolError::Read)?;
         let opinions = explained.opinions().iter().map(dynamic_opinion).collect();
         Ok(DynamicExplanation {
             subject: explained.subject().get(),
+            space: self.space.id().get(),
+            revision: self.space.revision().get(),
             value: DynamicValue::Integer(*explained.value()),
             opinions,
             winner: explained.winner(),
@@ -268,6 +376,10 @@ impl<'a> ReferenceTool<'a> {
     }
 
     /// Validates and delegates a dynamic transaction to the typed host path.
+    ///
+    /// Use one prior [`Self::read`] result to populate the request's selection
+    /// context and each operation guard, as shown in the [`ReferenceTool`]
+    /// example.
     pub fn transact(
         &mut self,
         request: DynamicTransaction,
@@ -387,7 +499,11 @@ fn dynamic_opinion(opinion: &Opinion<i64, LoadProvenance>) -> DynamicOpinion {
     }
 }
 
-/// Failure at the schema-backed dynamic boundary.
+/// Failure returned by [`ReferenceTool::read`] or [`ReferenceTool::transact`].
+///
+/// Schema and value errors are rejected before delegation. Typed read and
+/// transaction failures remain distinguishable in [`Self::Read`] and
+/// [`Self::Conflict`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ToolError {
     /// The locator named another runtime space instance.
@@ -474,24 +590,25 @@ mod tests {
             },
             facet: "load".into(),
         };
-        let dynamic_space_id = dynamic_space.id().get();
         let mut tool = ReferenceTool::new(&mut dynamic_space);
         assert_eq!(tool.schema().facets[0].name, "load");
         let before = tool.read(&dynamic_endpoint).expect("dynamic read succeeds");
         assert_eq!(before.value, DynamicValue::Integer(120));
+        assert_eq!(before.space, 1);
+        assert_eq!(before.revision, 0);
         let report = tool
             .transact(DynamicTransaction {
-                selection_space: dynamic_space_id,
-                selection_revision: 0,
+                selection_space: before.space,
+                selection_revision: before.revision,
                 mode: TransactionMode::Apply,
                 operations: vec![DynamicSet {
                     endpoint: dynamic_endpoint.clone(),
                     value: DynamicValue::Integer(80),
                     guard: DynamicGuard {
-                        expected_referent: 3,
-                        expected_space: dynamic_space_id,
-                        expected_revision: 0,
-                        expected_value: DynamicValue::Integer(120),
+                        expected_referent: before.subject,
+                        expected_space: before.space,
+                        expected_revision: before.revision,
+                        expected_value: before.value,
                     },
                 }],
             })

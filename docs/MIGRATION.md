@@ -57,3 +57,9 @@ second source makes disagreement between composition legs unrepresentable.
 `DynamicTransaction` adds `selection_space`, and `DynamicGuard` adds
 `expected_space`. Set both to the runtime space id from the dynamic locator.
 The tooling adapter validates them before reconstructing typed revisions.
+
+`DynamicExplanation` now carries the `space` and `revision` at which its value
+was observed. Dynamic callers should copy those fields into
+`DynamicTransaction::{selection_space, selection_revision}` and
+`DynamicGuard::{expected_space, expected_revision}` instead of reaching through
+the adapter to typed host state.
