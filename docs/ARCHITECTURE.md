@@ -198,6 +198,11 @@ The dynamic layer should be schema-backed and capable of recovering type and
 capability information. It must not force the typed core to store every value in
 one universal enum.
 
+A dynamic read must return the observation context needed to guard a later
+mutation, including runtime space and revision. Requiring a tooling caller to
+reach through the adapter to typed host state would make the erased boundary
+illusory and could pair a value with the wrong snapshot.
+
 ## 10. Laws worth making executable
 
 The initial implementation should turn these into tests or conformance cases:
