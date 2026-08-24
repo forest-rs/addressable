@@ -1,0 +1,18 @@
+[package]
+name = "addressable_tooling"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Schema-backed dynamic tooling adapter for Addressable"
+keywords = ["address", "inspection", "schema"]
+categories = ["development-tools"]
+publish = false
+
+[dependencies]
+addressable.workspace = true
+addressable_reference.workspace = true
+
+[lints]
+workspace = true

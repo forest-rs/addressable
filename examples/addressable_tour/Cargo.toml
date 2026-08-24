@@ -1,0 +1,17 @@
+[package]
+name = "addressable_tour"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Executable complete vertical slice for Addressable"
+publish = false
+
+[dependencies]
+addressable.workspace = true
+addressable_reference.workspace = true
+addressable_tooling.workspace = true
+
+[lints]
+workspace = true
