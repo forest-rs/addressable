@@ -28,16 +28,19 @@ does not provide reusable production behavior.
 
 ## Invariants
 
-1. Space, referent, occurrence, endpoint, revision, and runtime handle identity
-   remain distinct types.
+1. Space, referent, occurrence, endpoint, revision, live-query, and runtime
+   handle identity remain distinct types. Every public revision value carries
+   its typed runtime space.
 2. Exact and relative text parse into structured addresses; strings are never
    the resolved representation.
 3. A pinned locator never returns ordinary success for a different referent.
 4. Query cardinality is visible in the query type, while ordering,
    deduplication, cycle behavior, and budgets remain explicit values.
-5. Watch deltas replay to the same observable snapshot as full recomputation.
+5. Watch deltas replay to the same observable snapshot as full recomputation
+   and cannot cross spaces or live-query streams.
 6. Guarded transactions validate atomically and expose dry-run and undo data.
-7. Correspondence preserves one-to-many outcomes and evidence.
+7. Correspondence preserves one-to-many outcomes and evidence; composition
+   cannot substitute an unrelated source for either mapping leg.
 8. Dynamic reads and writes recover a declared schema and delegate to the same
    typed host methods used by Rust callers.
 9. Runtime-local handles cannot be formatted or parsed as durable addresses.
@@ -75,19 +78,38 @@ tooling crates are honestly `std`-dependent. All packages begin unpublished.
 
 ## Cardinality decision
 
-`One`, `Optional`, and `Many` are marker types on `Query`. Reference execution
-methods accept the corresponding query type and return the corresponding
-shape. Dynamic tooling may erase that marker only after validating its schema.
-This combines compile-time call-site guidance with a representable runtime
-contract.
+`One`, `Optional`, and `Many` are marker types on `Query` and implement a sealed
+`Cardinality` trait. Every accepted marker therefore has a defined
+`CardinalityKind`. Reference execution methods accept the corresponding query
+type and return the corresponding shape. Dynamic tooling may erase that marker
+only after validating its schema. This combines compile-time call-site guidance
+with a representable runtime contract.
 
 ## Revision and space identity decision
 
 `SpaceId<S>` is a caller/host-assigned typed `u64`; it does not require a global
-allocator or atomics. `Revision` is a local monotonic value meaningful only
-with its space. Locations and resolved handles carry both. Durable addresses
-carry a space marker at compile time, while locators carry the runtime space
-identity required when several instances coexist.
+allocator or atomics. `Revision<S>` contains both that runtime space identity
+and a local monotonic sequence, so a naked or cross-space revision cannot enter
+the public typed API. Locations and resolved handles derive their owning space
+from that revision instead of storing a second potentially inconsistent copy.
+Durable addresses carry a space marker at compile time, while locators carry
+the runtime space identity required when several instances coexist.
+
+## Live-query identity decision
+
+`LiveQueryId<S>` is host-assigned within one typed space and does not prescribe
+an allocator. Every `QuerySnapshot` and `QueryDelta` carries both the live-query
+id and a `Revision<S>`. Delta construction and replay reject another live-query
+stream, another space, and transitions whose start and end revisions belong to
+different spaces before changing a snapshot.
+
+## Correspondence composition decision
+
+The second-leg callback receives the exact first-leg target and returns only
+the evidence-bearing targets that continue from it. It does not return another
+`Correspondence` with a redundant source field. A mismatched second-leg source
+is therefore unrepresentable while multiplicity and both evidence legs remain
+preserved.
 
 ## Explanation and erasure decision
 
@@ -105,3 +127,4 @@ or reference storage.
   once a second real adapter proves its common shape.
 - Async runtimes, serialization frameworks, and hash maps are not dependencies
   of the nucleus.
+- The bootstrap API migration is recorded in [`../MIGRATION.md`](../MIGRATION.md).

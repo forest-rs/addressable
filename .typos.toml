@@ -1,0 +1,8 @@
+# See https://github.com/crate-ci/typos/blob/master/docs/reference.md
+
+[default.extend-words]
+referent = "referent"
+
+[files]
+ignore-hidden = false
+extend-exclude = ["/.git"]
