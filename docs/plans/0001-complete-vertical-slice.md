@@ -12,7 +12,7 @@ correspondence; and an equivalent schema-backed dynamic operation.
 - A production graph database, query parser, async runtime, or incremental
   index.
 - Consumer-specific Setout, Layerstack, UI, or retrieval adapters.
-- Stable publication promises, release artifacts, or licensing changes.
+- Stable publication promises or release artifacts.
 - Performance claims before a consumer workload exists.
 
 ## Public call-site target
@@ -21,33 +21,31 @@ The API should make the semantic choices visible without exposing evaluator
 plumbing:
 
 ```rust,ignore
-let mut basilica = Basilica::new(SpaceId::new(1));
-let root = Locator::exact(
-    basilica.id(),
-    BasilicaView::Assembly,
-    AbsoluteAddress::parse("/basilica")?,
-);
-
-let query = Query::many(root)
+let mut basilica = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+let query = Query::many(basilica.root_locator())
     .traverse(BasilicaAxis::Descendants)
     .filter(BasilicaPredicate::LoadAtLeast(100))
     .deduplicate(Deduplication::Occurrence)
-    .order(Ordering::Stable)
+    .order(ResultOrdering::Stable)
     .cycles(CyclePolicy::SkipVisited(VisitIdentity::Occurrence))
     .budget(TraversalBudget::new(8, 128, 32, 512));
 
 let mut watch = basilica.watch(query.clone())?;
 let arch = basilica.query_many(&query)?.items()[0].clone();
-let endpoint = Endpoint::new(arch, Load);
+let endpoint = Endpoint::new(arch.clone(), Load);
 let explained = basilica.read_load(&endpoint)?;
 
-let edit = SetLoad::new(endpoint, 80, Guard::at(
-    explained.subject(),
+let edit = SetLoad::new(endpoint, 80, Guard::new(
+    *arch.referent(),
     basilica.revision(),
-    explained.value(),
+    *explained.value(),
+    EditCapability::SetLoad,
 ));
-let preview = basilica.transact(Transaction::dry_run([edit.clone()]))?;
-let applied = basilica.transact(Transaction::apply([edit]))?;
+let preview = basilica.transact(Transaction::dry_run(
+    basilica.revision(),
+    [edit.clone()],
+))?;
+let applied = basilica.transact(Transaction::apply(basilica.revision(), [edit]))?;
 let delta = watch.poll(&basilica)?;
 ```
 
@@ -81,18 +79,19 @@ after schema validation.
 - **Partial mutation:** validate every operation against one snapshot before
   applying any change; test a failing multi-operation transaction.
 - **Delta drift:** replay every emitted delta and compare it with full query
-  recomputation.
+  recomputation; reject another space, live-query stream, or cross-space
+  transition before replay.
 - **Dependency creep:** use only `core`, `alloc`, and `std` in this slice.
 
 ## Validation checklist
 
-- [ ] `typos`
-- [ ] `taplo fmt --check --diff`
-- [ ] `cargo fmt --all --check`
-- [ ] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
-- [ ] `cargo test --workspace --all-features`
-- [ ] warning-denied rustdoc
-- [ ] `x86_64-unknown-none` core check
-- [ ] `wasm32-unknown-unknown` core check
-- [ ] Rust 1.88 workspace check
-- [ ] executable tour run
+- [x] `typos`
+- [x] `taplo fmt --check --diff`
+- [x] `cargo fmt --all --check`
+- [x] `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- [x] `cargo test --workspace --all-features`
+- [x] warning-denied rustdoc
+- [x] `x86_64-unknown-none` core check
+- [x] `wasm32-unknown-unknown` core check
+- [x] Rust 1.88 workspace check
+- [x] executable tour run

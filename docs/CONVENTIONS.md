@@ -23,9 +23,8 @@ is owned by the durable plan and ADR in `docs/`.
 - Rust 1.88 is the conservative shared MSRV. Newer siblings have moved to 1.92,
   but Layerstack, Understory, Portolan, and Inkstone still prove 1.88.
 - Cargo resolver 2.
-- The intended repository metadata remains `Apache-2.0 OR MIT`, as already
-  stated in the bootstrap README. This slice does not add or alter license
-  texts.
+- Use the standard forest-rs `Apache-2.0 OR MIT` expression, root license
+  texts, and Rust-source copyright-header gate.
 - Internal dependencies are centralized in `[workspace.dependencies]`, use
   `default-features = false`, and carry versions when publication is intended.
 - Initial packages are `publish = false`; publication is an owner decision.

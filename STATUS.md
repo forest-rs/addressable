@@ -2,69 +2,109 @@
 
 ## Current state
 
-The GitHub repository was created on 2026-08-24 with an empty `README.md` on
-`main`. This bootstrap material was prepared from the originating ChatGPT Work
-conversation before moving development into a local Codex or local Work session.
+The complete initial vertical slice was implemented on 2026-08-24 on branch
+`codex/bootstrap-addressable`. The branch has been pushed for review; it has
+not been merged, tagged, or published.
 
-No Rust workspace, crate layout, public API, CI configuration, license files, or
-release policy has been committed yet. That is intentional: the cloud session
-could inspect GitHub but could not access the owner's local forest-rs checkout
-and old tenets.
+The workspace contains four underscore-named packages:
 
-## Why this branch exists
+- `addressable`: dependency-free, always `no_std + alloc` semantic vocabulary;
+- `addressable_reference`: a `std` scanning basilica host and second catalog
+  space;
+- `addressable_tooling`: schema-backed dynamic adaptation through typed host
+  calls;
+- `addressable_tour`: a separate executable proof crate.
 
-The originating conversation developed a mature architectural direction for
-Addressable and then encountered a product boundary: a cloud Work conversation
-could continue on desktop, but could not see `/Users/bruce/Development/forest-rs`
-or become the same repository-bound local Codex session.
+The crate decision, fences, invariants, and resolved bootstrap questions are in
+[`docs/adr/0001-initial-workspace-and-vertical-slice.md`](docs/adr/0001-initial-workspace-and-vertical-slice.md).
+The local forest-rs convention survey is in
+[`docs/CONVENTIONS.md`](docs/CONVENTIONS.md).
 
-This branch is the durable bridge across that brief break. The local session is
-not expected to reconstruct intent from chat history.
+## What is real
 
-## First actions for the local session
+The reference slice exercises every lifecycle item required by the initial
+architecture:
 
-1. Open or clone `forest-rs/addressable` under
-   `/Users/bruce/Development/forest-rs/addressable` and check out this branch.
-2. Read `AGENTS.md`, `MANDATE.md`, and `docs/ARCHITECTURE.md` completely.
-3. Discover and read applicable ancestor instructions and the old forest-rs
-   tenets. Search the local forest-rs tree rather than assuming they are public
-   or current.
-4. Inspect representative current CI, metadata, lint, formatting, licensing,
-   MSRV, feature, and `no_std` practice in sibling projects. At minimum compare
-   `exedra`, `portolan`, `layerstack`, `understory`, `overstory`, and `inkstone`.
-5. Record the resulting project conventions and any conflict with this bootstrap
-   architecture before scaffolding.
-6. Decide the smallest honest initial crate/workspace boundary that supports the
-   complete vertical slice in `docs/ARCHITECTURE.md`.
-7. Implement, test, and document the vertical slice. Use a branch and keep
-   changes reversible. Do not merge or publish without the owner's decision.
+1. One arch referent has distinct north and south assembly occurrences.
+2. Exact, relative, and pinned locators have canonical round-trip documents and
+   resolve with rich outcomes; pinned rebinding has a regression test.
+3. Typed queries cross explicitly between assembly and dependency views. Query
+   cardinality is restricted to the sealed `One`, `Optional`, and `Many`
+   markers. Ordering, deduplication, cycle policy, and four work budgets are
+   explicit. The dependency graph contains a real cycle.
+4. A typed `Load` endpoint returns effective value, alternatives, provenance,
+   and a domain-owned winning reason.
+5. A scanning watch maintains occurrence-identified query results under an
+   explicit host-assigned live-query identity.
+6. Atomic guarded transactions support dry-run and apply, require referent,
+   revision, value, and capability preconditions, and return undo information.
+7. Query deltas are replayed and compared with full recomputation. Replay
+   rejects another space, live-query stream, or cross-space transition without
+   partial effect.
+8. One arch referent maps to two independently addressable catalog results while
+   retaining correspondence evidence.
+9. The dynamic adapter declares its view/facet/value schema, reconstructs typed
+   endpoints and guards, and delegates to the same transaction method. Typed and
+   dynamic operation equivalence is tested, including undo data.
 
-Useful local discovery commands include:
+The tour runs all nine points through public APIs:
 
 ```sh
-rg --files /Users/bruce/Development/forest-rs \
-  | rg '(^|/)(AGENTS\.md|.*[Tt][Ee][Nn][Ee][Tt].*|ci\.yml|Cargo\.toml|taplo\.toml|clippy\.toml)$'
-
-rg -n -i 'tenet|no_std|msrv|wasm32v1-none|cargo hack|cargo semver|rustdoc' \
-  /Users/bruce/Development/forest-rs
+cargo run -p addressable_tour --locked
 ```
 
-Prefer narrower searches after locating likely files; the tree contains many
-repositories and generated build output may be large.
+## Deliberately simple execution
 
-## Important unresolved decisions
+The contracts are real; the first execution is intentionally modest:
 
-- Exact crate/module boundaries after applying local forest-rs conventions.
-- The smallest sufficient type representation for owned and borrowed names,
-  paths, locations, and occurrences.
-- Whether query cardinality belongs in static types, builders, execution
-  methods, or a combination.
-- Revision and space identity requirements in `no_std` contexts.
-- The division between shared explanation vocabulary and domain-defined
-  explanation payloads.
-- The erased/schema boundary needed by Portolan and agents.
-- Which consumer provides the first real adapter after the reference space.
+- resolution and query execution scan small vectors;
+- watches recompute synchronously when polled;
+- the reference mutation vocabulary currently authors one integer load facet;
+- the first watcher supports occurrence identity only and rejects other live
+  identities explicitly;
+- the catalog correspondence is in-memory and deterministic;
+- the tooling schema is reference-specific until a second real adapter proves a
+  generic protocol;
+- there is no textual query language, async runtime, persistent journal,
+  production index, or consumer adapter yet.
 
-The implementation agent owns these choices within the mandate and should use
-evidence to decide rather than asking the owner to settle routine architecture.
+These are replaceable host choices, not placeholders in the core semantic
+types. No production or development dependencies were added.
 
+## Validation evidence
+
+The repository is green under the local definition of done:
+
+```sh
+typos
+taplo fmt --check --diff
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+cargo test --workspace --all-features --locked
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --locked --no-deps --document-private-items
+cargo check -p addressable --locked --target x86_64-unknown-none
+cargo check -p addressable --locked --target wasm32-unknown-unknown
+cargo +1.88 check --workspace --all-targets --all-features --locked
+cargo +1.88 check -p addressable --locked --target x86_64-unknown-none
+cargo run -p addressable_tour --locked
+```
+
+Results: 23 unit tests and 4 doctests pass; strict Clippy and warning-denied
+rustdoc pass; native stable, Rust 1.88, bare-metal `no_std`, and WebAssembly
+core checks pass; repository formatting, typo, SPDX-header, and whitespace
+checks pass.
+
+## Repository decisions retained by the owner
+
+All packages remain `publish = false`. No merge, release, publication, or
+sibling-repository edit was performed. The repository includes the standard
+forest-rs Apache-2.0 and MIT license texts matching its workspace metadata.
+
+## Next architectural evidence
+
+The next meaningful step is one real consumer adapter, selected by consumer
+need rather than by expanding the generic core speculatively. A consumer should
+reuse the existing durable vocabulary while supplying its own typed identities,
+views, axes, predicates, endpoints, values, provenance, and evaluator. If that
+adapter reveals a genuine shared host trait or dynamic schema protocol, record
+the evidence in a new ADR before moving ownership between crates.

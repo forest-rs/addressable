@@ -3,6 +3,12 @@
 This document records the shape Addressable is trying to preserve before local
 implementation work begins. It is a starting constitution, not a frozen API.
 
+The initial crate boundary and complete executable slice are now implemented as
+recorded in
+[`adr/0001-initial-workspace-and-vertical-slice.md`](adr/0001-initial-workspace-and-vertical-slice.md).
+The mature architecture below remains the design target; the scanning host is a
+conformance execution, not a reduction of the mandate to its first evaluator.
+
 ## 1. Vocabulary
 
 ### Address space
@@ -134,6 +140,11 @@ A live query maintains located results across revisions and emits deltas such
 as additions, removals, updates, moves, and rebindings. Delta semantics must say
 whether identity is by occurrence, referent, or result-entry identity.
 
+Space identity and live-query identity are independent replay preconditions. A
+numerically equal revision in another space is not the same revision, and two
+subscriptions in one space are not interchangeable merely because their
+current entries happen to match.
+
 Important law: applying a coherent delta stream to the previous result set must
 produce the same observable result as recomputing the query at the new revision.
 
@@ -173,7 +184,8 @@ Layerstack authored spec
     -> Portolan live result and affordance
 ```
 
-Composition of correspondences must preserve ambiguity and provenance.
+Composition of correspondences must preserve ambiguity and provenance, and
+each second mapping leg must begin at the target produced by the first leg.
 
 ## 9. Typed and dynamic boundaries
 
@@ -241,4 +253,3 @@ whole lifecycle:
 
 That prevents later features from discovering that the foundational identity
 model was too small while keeping the first implementation finite.
-

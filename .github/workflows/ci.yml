@@ -1,0 +1,169 @@
+env:
+  # Keep the minimum version in sync with workspace.package.rust-version.
+  RUST_MIN_VER: "1.88"
+  RUST_STABLE_VER: "1.97"
+
+name: CI
+
+on:
+  pull_request:
+  merge_group:
+  push:
+    branches:
+      - main
+
+jobs:
+  fmt:
+    name: formatting and repository policy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE_VER }}
+          components: rustfmt
+
+      - name: cargo fmt
+        run: cargo fmt --all --check
+
+      - name: install Taplo
+        uses: uncenter/setup-taplo@09968a8ae38d66ddd3d23802c44bf6122d7aa991 # v1
+        with:
+          version: "0.9.3"
+
+      - name: taplo fmt
+        run: taplo fmt --check --diff
+
+      - name: install ripgrep
+        run: |
+          sudo apt update
+          sudo apt install ripgrep
+
+      - name: check copyright headers
+        run: bash .github/copyright.sh
+
+  clippy:
+    name: cargo clippy
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE_VER }}
+          components: clippy
+
+      - name: restore cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'merge_group' }}
+
+      - name: cargo clippy
+        run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+
+  portable-core:
+    name: portable core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE_VER }}
+          targets: x86_64-unknown-none,wasm32-unknown-unknown
+
+      - name: restore cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'merge_group' }}
+
+      - name: check bare-metal core
+        run: cargo check -p addressable --locked --target x86_64-unknown-none
+
+      - name: check WebAssembly core
+        run: cargo check -p addressable --locked --target wasm32-unknown-unknown
+
+  test:
+    name: cargo test
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE_VER }}
+
+      - name: restore cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'merge_group' }}
+
+      - name: cargo test
+        run: cargo test --workspace --all-features --locked
+
+      - name: cargo test docs
+        run: cargo test --doc --workspace --all-features --locked
+
+  msrv:
+    name: Rust 1.88
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install MSRV toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_MIN_VER }}
+          targets: x86_64-unknown-none
+
+      - name: restore cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'merge_group' }}
+
+      - name: check workspace
+        run: cargo check --workspace --all-targets --all-features --locked
+
+      - name: check bare-metal core
+        run: cargo check -p addressable --locked --target x86_64-unknown-none
+
+  docs:
+    name: rustdoc
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE_VER }}
+
+      - name: restore cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          save-if: ${{ github.event_name != 'merge_group' }}
+
+      - name: cargo doc
+        run: cargo doc --workspace --all-features --locked --no-deps --document-private-items
+        env:
+          RUSTDOCFLAGS: "-D warnings"
+
+  typos:
+    name: typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: check typos
+        uses: crate-ci/typos@v1.46.0
