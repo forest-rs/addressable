@@ -11,6 +11,24 @@ use addressable::{
 use crate::{Basilica, BasilicaLocation, BasilicaQuery, BasilicaSpace, OccurrenceId};
 
 /// A live many-result query tracked by occurrence identity.
+///
+/// Produced by [`Basilica::watch`]. Retain or clone [`Self::snapshot`], call
+/// [`Self::poll`] after the host may have changed, and replay the returned delta
+/// with [`QuerySnapshot::apply`](addressable::QuerySnapshot::apply).
+///
+/// ```
+/// use addressable::{Deduplication, Query, SpaceId};
+/// use addressable_reference::{Basilica, BasilicaSpace};
+///
+/// let mut space = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+/// let query = Query::many(space.root_locator())
+///     .deduplicate(Deduplication::Occurrence);
+/// let mut watch = space.watch(query).expect("watch starts");
+/// let mut replayed = watch.snapshot().clone();
+/// let delta = watch.poll(&space).expect("watch advances");
+/// replayed.apply(&delta).expect("delta replays");
+/// assert_eq!(&replayed, watch.snapshot());
+/// ```
 #[derive(Clone, Debug)]
 pub struct BasilicaWatch {
     query: BasilicaQuery<Many>,
@@ -45,7 +63,7 @@ impl BasilicaWatch {
 }
 
 impl Basilica {
-    /// Starts a scanning live query.
+    /// Starts a scanning live query and returns its initial snapshot.
     ///
     /// This first watcher deliberately accepts occurrence deduplication only,
     /// making its stable entry identity explicit.
@@ -82,6 +100,9 @@ fn snapshot(
 }
 
 /// Failure to start or advance a basilica watch.
+///
+/// Returned by [`Basilica::watch`] and [`BasilicaWatch::poll`]. The variants
+/// distinguish query-shape limitations from recomputation and delta failures.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum WatchError {
     /// This watcher requires occurrence-deduplicated results.

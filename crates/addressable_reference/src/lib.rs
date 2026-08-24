@@ -8,6 +8,12 @@
 //! live deltas, guarded transactions, and correspondence into [`Catalog`].
 //! It uses linear scans so the semantic contracts remain visible.
 //!
+//! # Resolve and query
+//!
+//! [`Basilica::root_locator`] is the shortest entry point. Resolution produces
+//! a [`BasilicaLocation`]; query cardinality selects [`Basilica::query_many`],
+//! [`Basilica::query_one`], or [`Basilica::query_optional`].
+//!
 //! ```
 //! use addressable::{CyclePolicy, Deduplication, Query, SpaceId, VisitIdentity};
 //! use addressable_reference::{
@@ -23,6 +29,56 @@
 //! let arches = space.query_many(&query)?;
 //! assert_eq!(arches.items().len(), 2);
 //! # Ok::<(), addressable::QueryError>(())
+//! ```
+//!
+//! # Read, explain, edit, and watch
+//!
+//! A location becomes an endpoint when paired with [`Load`]. Read the endpoint
+//! before constructing its [`Guard`](addressable::Guard); the observed referent,
+//! revision, and value are the mutation preconditions.
+//!
+//! ```
+//! use addressable::{
+//!     CyclePolicy, Deduplication, Endpoint, Guard, Query, SpaceId, Transaction,
+//!     VisitIdentity,
+//! };
+//! use addressable_reference::{
+//!     Basilica, BasilicaAxis, BasilicaPredicate, BasilicaSpace, EditCapability,
+//!     FeatureKind, Load, SetLoad,
+//! };
+//!
+//! let mut space = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+//! let query = Query::many(space.root_locator())
+//!     .traverse(BasilicaAxis::Descendants)
+//!     .filter(BasilicaPredicate::Kind(FeatureKind::Arch))
+//!     .deduplicate(Deduplication::Occurrence)
+//!     .cycles(CyclePolicy::SkipVisited(VisitIdentity::Occurrence));
+//! let mut watch = space.watch(query.clone()).expect("watch starts");
+//! let location = space
+//!     .query_many(&query)
+//!     .expect("query succeeds")
+//!     .items()[0]
+//!     .clone();
+//! let endpoint = Endpoint::new(location.clone(), Load);
+//! let explained = space.read_load(&endpoint).expect("load reads");
+//! let edit = SetLoad::new(
+//!     endpoint,
+//!     80,
+//!     Guard::new(
+//!         *location.referent(),
+//!         space.revision(),
+//!         *explained.value(),
+//!         EditCapability::SetLoad,
+//!     ),
+//! );
+//!
+//! let report = space
+//!     .transact(Transaction::apply(space.revision(), [edit]))
+//!     .expect("guarded transaction applies");
+//! let delta = watch.poll(&space).expect("watch advances");
+//!
+//! assert_eq!(report.changes().len(), 1);
+//! assert!(!delta.changes().is_empty());
 //! ```
 
 mod catalog;

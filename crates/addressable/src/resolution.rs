@@ -9,6 +9,11 @@ use crate::Revision;
 
 /// A resolution outcome that preserves absence, ambiguity, staleness, movement,
 /// and rebinding.
+///
+/// Domain hosts return this from locator resolution. Callers should match the
+/// rich variants when movement or rebinding needs different handling;
+/// [`Self::resolved`] is for workflows where every exceptional outcome can be
+/// collapsed to absence.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Resolution<S, T, I, A> {
@@ -71,6 +76,9 @@ impl<S, T, I, A> Resolution<S, T, I, A> {
 }
 
 /// Why otherwise valid resolution is partial.
+///
+/// Obtain this from [`Resolution::Partial`] and decide whether the accompanying
+/// values are useful for the caller's task.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum PartialReason {
@@ -83,6 +91,8 @@ pub enum PartialReason {
 }
 
 /// The budget dimension that stopped work.
+///
+/// Returned inside [`BudgetExceeded`] by resolution or query execution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BudgetDimension {
     /// Maximum traversal depth.
@@ -96,6 +106,10 @@ pub enum BudgetDimension {
 }
 
 /// Evidence that one declared traversal budget was exceeded.
+///
+/// Hosts construct this when a [`TraversalBudget`](crate::TraversalBudget)
+/// limit is crossed; callers can inspect the dimension, declared limit, and
+/// first value beyond it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BudgetExceeded {
     dimension: BudgetDimension,

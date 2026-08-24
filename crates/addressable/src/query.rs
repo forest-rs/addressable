@@ -9,18 +9,30 @@ use core::marker::PhantomData;
 use crate::BudgetExceeded;
 
 /// Marker for a query that must return exactly one result.
+///
+/// Select it with [`Query::one`] or [`Query::with_cardinality`], then call the
+/// host's one-result execution method.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct One;
 
 /// Marker for a query that may return zero or one result.
+///
+/// Select it with [`Query::optional`] or [`Query::with_cardinality`], then call
+/// the host's optional-result execution method.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Optional;
 
 /// Marker for a query that may return several results.
+///
+/// Select it with [`Query::many`] or [`Query::with_cardinality`], then call the
+/// host's many-result execution or watch method.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Many;
 
 /// Runtime representation of the static cardinality marker.
+///
+/// Returned by [`Query::cardinality`] and used by hosts when reporting a
+/// [`QueryError::Cardinality`] mismatch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CardinalityKind {
     /// Exactly one result is required.
@@ -64,6 +76,9 @@ impl Cardinality for Many {
 }
 
 /// One host-defined query operation.
+///
+/// Callers normally append these through [`Query::traverse`] and
+/// [`Query::filter`]. Hosts inspect them through [`Query::steps`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QueryStep<A, P> {
     /// Traverse one typed domain axis.
@@ -73,6 +88,8 @@ pub enum QueryStep<A, P> {
 }
 
 /// Ordering promised by query execution.
+///
+/// Pass this to [`Query::order`]; hosts must honor the selected contract.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ResultOrdering {
     /// Preserve deterministic traversal order.
@@ -84,6 +101,9 @@ pub enum ResultOrdering {
 }
 
 /// Result deduplication identity.
+///
+/// Pass this to [`Query::deduplicate`] to choose whether repeated occurrences
+/// or referents remain visible.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Deduplication {
     /// Preserve every result entry, including repeats.
@@ -95,6 +115,9 @@ pub enum Deduplication {
 }
 
 /// Identity used to detect revisitation during cyclic traversal.
+///
+/// Use this inside [`CyclePolicy::SkipVisited`], then pass the policy to
+/// [`Query::cycles`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum VisitIdentity {
     /// A distinct occurrence is a distinct visit.
@@ -104,6 +127,9 @@ pub enum VisitIdentity {
 }
 
 /// Declared behavior when traversal encounters a cycle.
+///
+/// Pass this to [`Query::cycles`]. A host returns [`QueryError::Cycle`] when
+/// `Error` is selected and revisitation occurs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CyclePolicy {
     /// Stop and return a cycle error.
@@ -113,6 +139,9 @@ pub enum CyclePolicy {
 }
 
 /// Explicit upper bounds for query execution.
+///
+/// Construct all four limits with [`Self::new`] and pass them to
+/// [`Query::budget`]. Hosts report the first exceeded dimension.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TraversalBudget {
     /// Maximum axis-traversal depth.
@@ -145,6 +174,9 @@ impl Default for TraversalBudget {
 }
 
 /// Shared policy that every query carries explicitly.
+///
+/// Callers normally set individual fields through the fluent [`Query`] methods.
+/// Hosts obtain the complete copy through [`Query::semantics`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct QuerySemantics {
     /// Promised result ordering.
@@ -172,6 +204,36 @@ impl Default for QuerySemantics {
 ///
 /// `L`, `A`, and `P` are the host's locator, axis, and predicate types. `C`
 /// records result cardinality at the call site.
+///
+/// Callers construct a query with [`Self::many`], [`Query::one`], or
+/// [`Query::optional`], add domain axes and predicates, select explicit
+/// semantics, and pass it to the matching host execution method. Addressable
+/// builds and exposes this portable query representation; the host owns its
+/// execution.
+///
+/// ```
+/// use addressable::{
+///     CardinalityKind, CyclePolicy, Deduplication, Query, ResultOrdering,
+///     VisitIdentity,
+/// };
+///
+/// enum Axis { Descendants }
+/// enum Predicate { IsArch }
+/// let query = Query::many("/basilica")
+///     .traverse(Axis::Descendants)
+///     .filter(Predicate::IsArch)
+///     .deduplicate(Deduplication::Occurrence)
+///     .order(ResultOrdering::Stable)
+///     .cycles(CyclePolicy::SkipVisited(VisitIdentity::Occurrence));
+///
+/// assert_eq!(query.cardinality(), CardinalityKind::Many);
+/// assert_eq!(query.semantics().deduplication, Deduplication::Occurrence);
+/// assert_eq!(query.semantics().ordering, ResultOrdering::Stable);
+/// assert_eq!(
+///     query.semantics().cycle_policy,
+///     CyclePolicy::SkipVisited(VisitIdentity::Occurrence),
+/// );
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Query<L, A, P, C: Cardinality = Many> {
     start: L,
@@ -303,7 +365,10 @@ impl<L, A, P, C: Cardinality> Query<L, A, P, C> {
     }
 }
 
-/// Host-independent query failure.
+/// Host-independent query failure returned by query execution.
+///
+/// Callers can distinguish an unresolved start, cardinality mismatch, cycle,
+/// budget exhaustion, and unsupported domain step without parsing diagnostics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum QueryError {
     /// The start locator did not resolve to an ordinary result.
@@ -324,6 +389,9 @@ pub enum QueryError {
 }
 
 /// Measured work performed by a query execution.
+///
+/// Hosts return this inside [`QueryResults`] or another cardinality-shaped
+/// result. Callers can use it for diagnostics and explicit budget tuning.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct QueryStats {
     /// Nodes inspected, including nodes rejected by predicates.
@@ -335,6 +403,9 @@ pub struct QueryStats {
 }
 
 /// Query items paired with measured execution work.
+///
+/// A host returns this from many-result query execution. Callers inspect
+/// [`Self::items`] and can use [`Self::stats`] for budgeting or diagnostics.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct QueryResults<T> {
     items: Box<[T]>,
@@ -342,7 +413,7 @@ pub struct QueryResults<T> {
 }
 
 impl<T> QueryResults<T> {
-    /// Creates a measured result collection.
+    /// Creates a measured result collection on behalf of a query host.
     #[must_use]
     pub fn new(items: impl IntoIterator<Item = T>, stats: QueryStats) -> Self {
         Self {

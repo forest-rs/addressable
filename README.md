@@ -9,7 +9,7 @@ It preserves distinctions that string paths and runtime handles usually erase:
 - an occurrence is where that thing appears in a particular view;
 - an endpoint is a typed facet on a located owner;
 - a space-typed revision says which instance and state were resolved;
-- a resolved handle is a runtime capability, never durable identity.
+- a resolved handle is a revision-scoped runtime token, never durable identity.
 
 The same arch referent can therefore appear as north and south assembly
 occurrences without being duplicated. A caller can query both, deduplicate by
@@ -77,6 +77,10 @@ let applied = space
     .transact(Transaction::apply(space.revision(), [edit]))
     .expect("edit applies");
 let delta = watch.poll(&space).expect("watch advances");
+
+assert_eq!(preview.changes().len(), 1);
+assert_eq!(applied.changes().len(), 1);
+assert!(!delta.changes().is_empty());
 ```
 
 The full tour also resolves exact, relative, and pinned locators; crosses
@@ -87,6 +91,10 @@ guarded operation through the dynamic schema boundary:
 ```sh
 cargo run -p addressable_tour
 ```
+
+The executable presents those transitions as five named chapters, so it can be
+read from top to bottom or run as a narrated overview. Focused rustdoc examples
+on the workflow types use the same call paths and run as doctests.
 
 ## Semantic contracts
 

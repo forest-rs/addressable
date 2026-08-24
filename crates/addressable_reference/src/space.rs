@@ -19,6 +19,11 @@ use crate::model::{
 };
 
 /// Measured single-value or optional query output.
+///
+/// [`Basilica::query_one`] and [`Basilica::query_optional`] produce this shape
+/// so their cardinality-specific value does not lose the common query work
+/// measurements. Use [`Self::value`] for the result and [`Self::stats`] for
+/// diagnostics or budget tuning.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Measured<T> {
     value: T,
@@ -26,7 +31,7 @@ pub struct Measured<T> {
 }
 
 impl<T> Measured<T> {
-    /// Pairs a cardinality-shaped value with measured query work.
+    /// Pairs a cardinality-shaped value with measured query work for a host.
     #[must_use]
     pub const fn new(value: T, stats: QueryStats) -> Self {
         Self { value, stats }
@@ -52,6 +57,10 @@ impl<T> Measured<T> {
 }
 
 /// The complete scanning reference basilica space.
+///
+/// Start with [`Self::root_locator`], then resolve, query, watch, or form typed
+/// endpoints. This host deliberately uses scanning implementations so the
+/// semantics remain visible independently of indexing or storage choices.
 #[derive(Clone, Debug)]
 pub struct Basilica {
     pub(crate) id: SpaceId<BasilicaSpace>,
@@ -156,6 +165,20 @@ impl Basilica {
     }
 
     /// Resolves an exact or relative locator with rich outcome semantics.
+    ///
+    /// The resolved [`BasilicaLocation`] can seed an [`Endpoint`] or be passed
+    /// to [`Self::resolved_handle`].
+    ///
+    /// ```
+    /// use addressable::{Resolution, SpaceId};
+    /// use addressable_reference::{Basilica, BasilicaSpace};
+    ///
+    /// let space = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+    /// let Resolution::Resolved(root) = space.resolve(&space.root_locator()) else {
+    ///     panic!("reference root must resolve");
+    /// };
+    /// assert_eq!(root.address().to_string(), "/basilica");
+    /// ```
     #[must_use]
     pub fn resolve(&self, locator: &BasilicaLocator) -> BasilicaResolution {
         if locator.space() != self.id {
@@ -173,6 +196,29 @@ impl Basilica {
     }
 
     /// Resolves a pinned locator without silently accepting rebinding.
+    ///
+    /// Form the pin from one successful resolution: retain the locator and pair
+    /// it with the returned location's referent and revision. The result then
+    /// distinguishes a still-valid target from movement, rebinding, staleness,
+    /// absence, and ambiguity.
+    ///
+    /// ```
+    /// use addressable::{Pinned, Resolution, SpaceId};
+    /// use addressable_reference::{Basilica, BasilicaSpace};
+    ///
+    /// let space = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+    /// let locator = space.root_locator();
+    /// let Resolution::Resolved(root) = space.resolve(&locator) else {
+    ///     panic!("reference root must resolve");
+    /// };
+    /// let pinned = Pinned::new(locator, *root.referent(), root.revision());
+    /// let Resolution::Resolved(root_again) = space.resolve_pinned(&pinned) else {
+    ///     panic!("unchanged pin must resolve");
+    /// };
+    ///
+    /// assert_eq!(root_again.referent(), root.referent());
+    /// assert_eq!(root_again.revision(), root.revision());
+    /// ```
     #[must_use]
     pub fn resolve_pinned(
         &self,
@@ -227,7 +273,7 @@ impl Basilica {
         }
     }
 
-    /// Executes a many-result query.
+    /// Executes a many-result query, returning locations and measured work.
     pub fn query_many(
         &self,
         query: &BasilicaQuery<Many>,
@@ -272,6 +318,12 @@ impl Basilica {
     }
 
     /// Resolves a revision-scoped runtime feature slot.
+    ///
+    /// This scanning reference exposes its [`SlotHandle`] to demonstrate the
+    /// boundary between durable identity and revision-scoped runtime identity.
+    /// It deliberately has no handle-based read path because scanning its small
+    /// vectors does not benefit from one. Production hosts may define such fast
+    /// paths; a caller must re-resolve the handle after the revision changes.
     pub fn resolved_handle(
         &self,
         location: &BasilicaLocation,
@@ -287,6 +339,30 @@ impl Basilica {
     }
 
     /// Reads and explains the effective typed load endpoint.
+    ///
+    /// Use the returned value, its subject, and the space revision when forming
+    /// the [`Guard`](addressable::Guard) for a [`SetLoad`](crate::SetLoad)
+    /// operation.
+    ///
+    /// ```
+    /// use addressable::{AbsoluteAddress, Endpoint, Locator, Resolution, SpaceId};
+    /// use addressable_reference::{Basilica, BasilicaSpace, BasilicaView, Load};
+    ///
+    /// let space = Basilica::new(SpaceId::<BasilicaSpace>::new(1));
+    /// let locator = Locator::exact(
+    ///     space.id(),
+    ///     BasilicaView::Assembly,
+    ///     AbsoluteAddress::parse("/basilica/nave/north_arch").expect("valid address"),
+    /// );
+    /// let Resolution::Resolved(arch) = space.resolve(&locator) else {
+    ///     panic!("north arch must resolve");
+    /// };
+    /// let explained = space
+    ///     .read_load(&Endpoint::new(arch, Load))
+    ///     .expect("load reads");
+    /// assert_eq!(explained.value(), &120);
+    /// assert!(!explained.opinions().is_empty());
+    /// ```
     pub fn read_load(
         &self,
         endpoint: &Endpoint<BasilicaLocation, Load>,
@@ -569,7 +645,10 @@ impl Basilica {
     }
 }
 
-/// Failure to read through a resolved endpoint or handle.
+/// Failure to validate a resolved location for an endpoint read or handle lookup.
+///
+/// Returned by [`Basilica::read_load`] and [`Basilica::resolved_handle`], and
+/// nested in transaction conflicts when an endpoint is no longer usable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReadError {
     /// The location belongs to another runtime space instance.
