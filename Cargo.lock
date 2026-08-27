@@ -11,6 +11,7 @@ name = "addressable_reference"
 version = "0.1.0"
 dependencies = [
  "addressable",
+ "addressable_tree",
 ]
 
 [[package]]
@@ -28,4 +29,11 @@ dependencies = [
  "addressable",
  "addressable_reference",
  "addressable_tooling",
+]
+
+[[package]]
+name = "addressable_tree"
+version = "0.1.0"
+dependencies = [
+ "addressable",
 ]

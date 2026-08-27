@@ -5,9 +5,11 @@
 The complete initial vertical slice landed on `main` on 2026-08-24. No crate
 has been tagged or published.
 
-The workspace contains four packages:
+The workspace contains five packages:
 
 - `addressable`: dependency-free, always `no_std + alloc` semantic vocabulary;
+- `addressable_tree`: reusable `no_std + alloc` resolution and typed query
+  execution over host-owned rooted trees;
 - `addressable_reference`: a `std` scanning basilica host and second catalog
   space;
 - `addressable_tooling`: schema-backed dynamic adaptation through typed host
@@ -16,6 +18,8 @@ The workspace contains four packages:
 
 The crate decision, fences, invariants, and resolved bootstrap questions are in
 [`docs/adr/0001-initial-workspace-and-vertical-slice.md`](docs/adr/0001-initial-workspace-and-vertical-slice.md).
+The first consumer-derived execution boundary is in
+[`docs/adr/0002-tree-runtime-from-exedra.md`](docs/adr/0002-tree-runtime-from-exedra.md).
 The local forest-rs convention survey is in
 [`docs/CONVENTIONS.md`](docs/CONVENTIONS.md).
 
@@ -30,7 +34,8 @@ architecture:
 3. Typed queries cross explicitly between assembly and dependency views. Query
    cardinality is restricted to the sealed `One`, `Optional`, and `Many`
    markers. Ordering, deduplication, cycle policy, and four work budgets are
-   explicit. The dependency graph contains a real cycle.
+   explicit. Pure assembly queries execute through `addressable_tree`; the
+   dependency graph retains its custom evaluator and contains a real cycle.
 4. A typed `Load` endpoint returns effective value, alternatives, provenance,
    and a domain-owned winning reason.
 5. A scanning watch maintains occurrence-identified query results under an
@@ -71,8 +76,14 @@ The contracts are real; the first execution is intentionally modest:
 - the catalog correspondence is in-memory and deterministic;
 - the tooling schema is reference-specific until a second real adapter proves a
   generic protocol;
-- there is no textual query language, async runtime, persistent journal,
-  production index, or consumer adapter yet.
+- there is no textual query language, async runtime, persistent journal, or
+  production index;
+- `addressable_tree` deliberately covers rooted canonical-address trees only;
+  other relationship views keep specialized evaluators;
+- tree hosts yield projected nodes lazily, can index referent occurrences, and
+  use ordered sets for cycle detection and deduplication;
+- runtime extraction preserves the revision needed by `resume`, while
+  validated in-place commits advance the clock without cloning a whole host.
 
 These are replaceable host choices, not placeholders in the core semantic
 types. No production or development dependencies were added.
@@ -88,10 +99,10 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo test --workspace --all-features --locked
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --locked --no-deps --document-private-items
-cargo check -p addressable --locked --target x86_64-unknown-none
-cargo check -p addressable --locked --target wasm32-unknown-unknown
+cargo check -p addressable -p addressable_tree --locked --target x86_64-unknown-none
+cargo check -p addressable -p addressable_tree --locked --target wasm32-unknown-unknown
 cargo +1.88 check --workspace --all-targets --all-features --locked
-cargo +1.88 check -p addressable --locked --target x86_64-unknown-none
+cargo +1.88 check -p addressable -p addressable_tree --locked --target x86_64-unknown-none
 cargo run -p addressable_tour --locked
 ```
 
@@ -108,9 +119,9 @@ forest-rs Apache-2.0 and MIT license texts matching its workspace metadata.
 
 ## Next architectural evidence
 
-The next meaningful step is one real consumer adapter, selected by consumer
-need rather than by expanding the generic core speculatively. A consumer should
-reuse the existing durable vocabulary while supplying its own typed identities,
-views, axes, predicates, endpoints, values, provenance, and evaluator. If that
-adapter reveals a genuine shared host trait or dynamic schema protocol, record
-the evidence in a new ADR before moving ownership between crates.
+The Exedra consumer exposed a genuine shared host seam, and the Basilica
+assembly view now proves it against a second storage model. An outline/tree UI
+is a credible next consumer: occurrence-aware rows, stable addresses, ordering,
+budgets, and multiple views already fit. Pull live row deltas, lazy ranges, or
+other execution machinery forward only when that consumer supplies concrete
+behavior and deletion.

@@ -231,6 +231,8 @@ shape to evaluate locally is:
 
 - `addressable`: `no_std` plus `alloc` vocabulary, exact addressing, resolution
   contracts, typed query IR, and semantic result types;
+- a dependency-light `no_std` runtime for reusable execution over host-owned
+  rooted trees when consumer evidence proves the seam;
 - a `std` reference/runtime crate for in-memory indexes, watches, transactions,
   and conformance fixtures;
 - an erased/schema tooling crate only when a real inspector or agent adapter
@@ -238,8 +240,9 @@ shape to evaluate locally is:
 - consumer adapters living with the consumer unless a dependency-neutral
   integration crate is clearly warranted.
 
-This is not yet a decision. Inspect the old forest-rs tenets and current sibling
-practice before fixing the workspace shape.
+The initial workspace decision is recorded in ADR 0001. Exedra subsequently
+proved the rooted-tree runtime boundary recorded in ADR 0002; that boundary
+does not imply a universal graph evaluator or storage engine.
 
 ## 12. Initial complete vertical slice
 

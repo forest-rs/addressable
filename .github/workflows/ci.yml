@@ -85,10 +85,10 @@ jobs:
           save-if: ${{ github.event_name != 'merge_group' }}
 
       - name: check bare-metal core
-        run: cargo check -p addressable --locked --target x86_64-unknown-none
+        run: cargo check -p addressable -p addressable_tree --locked --target x86_64-unknown-none
 
       - name: check WebAssembly core
-        run: cargo check -p addressable --locked --target wasm32-unknown-unknown
+        run: cargo check -p addressable -p addressable_tree --locked --target wasm32-unknown-unknown
 
   test:
     name: cargo test
@@ -136,7 +136,7 @@ jobs:
         run: cargo check --workspace --all-targets --all-features --locked
 
       - name: check bare-metal core
-        run: cargo check -p addressable --locked --target x86_64-unknown-none
+        run: cargo check -p addressable -p addressable_tree --locked --target x86_64-unknown-none
 
   docs:
     name: rustdoc
