@@ -3,7 +3,9 @@
 ## Current state
 
 The complete initial vertical slice landed on `main` on 2026-08-24. No crate
-has been tagged or published.
+has been tagged or published. `addressable` and `addressable_tree` are now the
+proposed first `0.1.0` release crates; the reference, tooling, and tour packages
+remain internal proofs.
 
 The workspace contains five packages:
 
@@ -29,8 +31,10 @@ The reference slice exercises every lifecycle item required by the initial
 architecture:
 
 1. One arch referent has distinct north and south assembly occurrences.
-2. Exact, relative, and pinned locators have canonical round-trip documents and
-   resolve with rich outcomes; pinned rebinding has a regression test.
+2. Exact and relative locators have delimiter-safe runtime-scoped textual
+   round trips. Pins are constructed from one resolved location, reject
+   cross-space text, and resolve with rich outcomes; pinned rebinding has a
+   regression test.
 3. Typed queries cross explicitly between assembly and dependency views. Query
    cardinality is restricted to the sealed `One`, `Optional`, and `Many`
    markers. Ordering, deduplication, cycle policy, and four work budgets are
@@ -44,7 +48,8 @@ architecture:
    revision, value, and capability preconditions, and return undo information.
 7. Query deltas are replayed and compared with full recomputation. Replay
    rejects another space, live-query stream, or cross-space transition without
-   partial effect.
+   partial effect. Revisions cannot move backward or carry changes without
+   advancing; an empty same-revision poll remains valid.
 8. One arch referent maps to two independently addressable catalog results while
    retaining correspondence evidence.
 9. The dynamic adapter declares its view/facet/value schema, reconstructs typed
@@ -81,8 +86,9 @@ The contracts are real; the first execution is intentionally modest:
 - `addressable_tree` deliberately covers rooted canonical-address trees only;
   other relationship views keep specialized evaluators;
 - tree hosts yield projected nodes lazily, can index referent occurrences, and
-  use ordered sets for cycle detection and deduplication;
-- runtime extraction preserves the revision needed by `resume`, while
+  use ordered sets for cycle detection and deduplication; predicate matching
+  reports host-defined work charged against the query budget;
+- runtime extraction preserves the revision needed by `from_revision`, while
   validated in-place commits advance the clock without cloning a whole host.
 
 These are replaceable host choices, not placeholders in the core semantic
@@ -106,22 +112,29 @@ cargo +1.88 check -p addressable -p addressable_tree --locked --target x86_64-un
 cargo run -p addressable_tour --locked
 ```
 
-Results: 26 unit tests and 16 doctests pass; strict Clippy and warning-denied
-rustdoc pass; native stable, Rust 1.88, bare-metal `no_std`, and WebAssembly
-core checks pass; repository formatting, typo, SPDX-header, and whitespace
-checks pass.
-
-## Repository decisions retained by the owner
-
-All packages remain `publish = false`. No merge, release, publication, or
-sibling-repository edit was performed. The repository includes the standard
-forest-rs Apache-2.0 and MIT license texts matching its workspace metadata.
+Results: 37 unit tests and 18 doctests or compile-fail laws pass; strict Clippy
+and warning-denied rustdoc pass; native stable, Rust 1.88, bare-metal `no_std`,
+and WebAssembly core checks pass; repository formatting, typo, SPDX-header, and
+whitespace checks pass. `addressable` verifies from its packaged archive; both
+proposed release crates produce registry-normalized archives containing their
+README, changelog, and Apache-2.0/MIT license texts.
 
 ## Next architectural evidence
 
-The Exedra consumer exposed a genuine shared host seam, and the Basilica
-assembly view now proves it against a second storage model. An outline/tree UI
-is a credible next consumer: occurrence-aware rows, stable addresses, ordering,
-budgets, and multiple views already fit. Pull live row deltas, lazy ranges, or
-other execution machinery forward only when that consumer supplies concrete
-behavior and deletion.
+The Exedra consumer exposed a genuine shared host seam, and Basilica proves it
+against a second storage model. Three isolated consumer experiments sharpened
+the release boundary further:
+
+- an Overstory inspection snapshot borrows into the tree runtime at its own
+  revision, but its topology-aware live outline patch should not be replaced by
+  the flat generic delta;
+- a Layerstack composed stage keeps storage, path interning, and composition
+  policy while reporting real opinion-resolution work to query budgets;
+- a Ruthere presence facet carries a typed focus pin through visibility,
+  replacement, cursors, and expiry without making Addressable own presence or
+  collaboration.
+
+These are evidence branches, not automatic integration candidates: the
+Overstory and Layerstack adapters currently add inspection capability without
+deleting consumer code. Durable cross-process space naming remains deliberately
+unclaimed until a transport consumer can prove its envelope.

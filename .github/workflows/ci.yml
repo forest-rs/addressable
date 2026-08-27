@@ -159,6 +159,22 @@ jobs:
         env:
           RUSTDOCFLAGS: "-D warnings"
 
+  package:
+    name: cargo package --list
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: install stable toolchain
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.RUST_STABLE_VER }}
+
+      - name: cargo package --list
+        run: |
+          cargo package -p addressable --locked --list >/dev/null
+          cargo package -p addressable_tree --locked --list >/dev/null
+
   typos:
     name: typos
     runs-on: ubuntu-latest

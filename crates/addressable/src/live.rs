@@ -218,9 +218,10 @@ where
     K: Clone + Eq,
     T: Clone + Eq,
 {
-    /// Applies one delta atomically.
+    /// Applies one forward delta atomically.
     ///
-    /// On error, `self` is unchanged.
+    /// The destination revision must be later than the source unless this is an
+    /// empty no-op delta. On error, `self` is unchanged.
     pub fn apply(&mut self, delta: &QueryDelta<S, K, T>) -> Result<(), DeltaError<S>> {
         if self.live_query != delta.live_query {
             return Err(DeltaError::LiveQueryMismatch);
@@ -232,6 +233,14 @@ where
             return Err(DeltaError::WrongRevision {
                 expected: self.revision,
                 actual: delta.from_revision,
+            });
+        }
+        if delta.to_revision.get() < delta.from_revision.get()
+            || (delta.to_revision == delta.from_revision && !delta.changes.is_empty())
+        {
+            return Err(DeltaError::InvalidRevisionTransition {
+                from: delta.from_revision,
+                to: delta.to_revision,
             });
         }
         if self.identity != delta.identity {
@@ -345,6 +354,10 @@ pub struct QueryDelta<S, K, T> {
 
 impl<S, K, T> QueryDelta<S, K, T> {
     /// Creates a delta from ordered structural changes on behalf of a host.
+    ///
+    /// Hosts must supply a destination revision later than the source, except
+    /// for an empty no-op delta. [`QuerySnapshot::apply`] validates that
+    /// invariant before replay.
     #[must_use]
     pub fn new(
         live_query: LiveQueryId<S>,
@@ -398,7 +411,10 @@ where
     K: Clone + Eq,
     T: Clone + Eq,
 {
-    /// Computes a deterministic delta between complete snapshots.
+    /// Computes a deterministic forward delta between complete snapshots.
+    ///
+    /// `after` must belong to the same space and live-query stream. Its revision
+    /// may equal `before` only when the ordered entries are unchanged.
     pub fn between(
         before: &QuerySnapshot<S, K, T>,
         after: &QuerySnapshot<S, K, T>,
@@ -408,6 +424,14 @@ where
         }
         if before.revision.space() != after.revision.space() {
             return Err(DeltaError::SpaceMismatch);
+        }
+        if after.revision.get() < before.revision.get()
+            || (after.revision == before.revision && after.entries != before.entries)
+        {
+            return Err(DeltaError::InvalidRevisionTransition {
+                from: before.revision,
+                to: after.revision,
+            });
         }
         if before.identity != after.identity {
             return Err(DeltaError::IdentityMismatch);
@@ -515,6 +539,13 @@ pub enum DeltaError<S> {
         /// Delta's declared previous revision.
         actual: Revision<S>,
     },
+    /// The delta moves backward or changes entries without advancing.
+    InvalidRevisionTransition {
+        /// Delta's declared previous revision.
+        from: Revision<S>,
+        /// Delta's invalid destination revision.
+        to: Revision<S>,
+    },
     /// Snapshot and delta use different live-entry identities.
     IdentityMismatch,
     /// A snapshot contains duplicate stable keys.
@@ -590,6 +621,72 @@ mod tests {
             snapshot.apply(&crossing_space),
             Err(DeltaError::SpaceMismatch)
         );
+        assert_eq!(snapshot, original);
+    }
+
+    #[test]
+    fn replay_rejects_invalid_revision_transitions_atomically() {
+        let space = SpaceId::<TestSpace>::new(1);
+        let stream = LiveQueryId::<TestSpace>::new(10);
+        let mut snapshot = QuerySnapshot::new(
+            stream,
+            Revision::new(space, 4),
+            ResultIdentity::Entry,
+            [ResultEntry::new(1_u8, "one")],
+        );
+        let original = snapshot.clone();
+        let rewind = QueryDelta::new(
+            stream,
+            Revision::new(space, 4),
+            Revision::new(space, 3),
+            ResultIdentity::Entry,
+            [],
+        );
+
+        assert!(matches!(
+            snapshot.apply(&rewind),
+            Err(DeltaError::InvalidRevisionTransition { .. })
+        ));
+        assert_eq!(snapshot, original, "failed replay must remain atomic");
+
+        let earlier = QuerySnapshot::new(
+            stream,
+            Revision::new(space, 3),
+            ResultIdentity::Entry,
+            [ResultEntry::new(1_u8, "one")],
+        );
+        assert!(matches!(
+            QueryDelta::between(&original, &earlier),
+            Err(DeltaError::InvalidRevisionTransition { .. })
+        ));
+
+        let no_op = QueryDelta::new(
+            stream,
+            Revision::new(space, 4),
+            Revision::new(space, 4),
+            ResultIdentity::Entry,
+            [],
+        );
+        snapshot
+            .apply(&no_op)
+            .expect("an empty poll is a valid no-op");
+        assert_eq!(snapshot, original);
+
+        let unclocked_change = QueryDelta::new(
+            stream,
+            Revision::new(space, 4),
+            Revision::new(space, 4),
+            ResultIdentity::Entry,
+            [super::QueryChange::Updated {
+                index: 0,
+                old: ResultEntry::new(1_u8, "one"),
+                new: ResultEntry::new(1_u8, "changed"),
+            }],
+        );
+        assert!(matches!(
+            snapshot.apply(&unclocked_change),
+            Err(DeltaError::InvalidRevisionTransition { .. })
+        ));
         assert_eq!(snapshot, original);
     }
 

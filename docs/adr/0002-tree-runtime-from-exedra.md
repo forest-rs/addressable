@@ -38,16 +38,23 @@ and occurrence identities are ordered so cycle detection and deduplication use
   traversal budgets;
 - validated revision-scoped runtime handles.
 
+Predicate matching returns `PredicateMatch` rather than a bare boolean. The
+result includes host-defined work, which the runtime charges against the query
+budget. Layerstack supplied the concrete need: testing a composed field may
+resolve an arbitrary opinion stack, so charging one unit merely because one
+frontier node was tested would make `max_work` misleading.
+
 Cardinality shaping through `Measured` and budget charging through `QueryStats`
 remain in `addressable`, because both tree and specialized graph evaluators use
 those host-independent query laws.
 
 The runtime exposes immutable host access and an infallible in-place commit
 that advances its revision once. Extraction returns the revision with the host,
-and `resume` restores that clock. Domain transactions remain responsible for
-validating fallible preconditions before commit. A drop guard advances the
-clock during unwinding as well, so a caught panic cannot expose a partially
-mutated host at its old revision.
+and `from_revision` restores that clock or binds a host snapshot that already
+owns one. Domain transactions remain responsible for validating fallible
+preconditions before commit. A drop guard advances the clock during unwinding
+as well, so a caught panic cannot expose a partially mutated host at its old
+revision.
 
 ## Consequences
 
@@ -58,6 +65,11 @@ mutated host at its old revision.
   their specialized evaluator.
 - Non-tree relationship views retain specialized evaluators; this runtime does
   not force the reference dependency graph into a tree abstraction.
-- The dependency-free `addressable` semantic nucleus remains unchanged.
+- The dependency-free `addressable` semantic nucleus does not absorb tree
+  traversal or host storage.
+- Overstory's retained inspection snapshot and a composed Layerstack stage can
+  both be borrowed as tree hosts without surrendering storage, revision, path
+  interning, or composition ownership. Those additive experiments remain
+  consumer-side evidence rather than APIs to land for their own sake.
 - Watches can later recompute the same typed tree query through this runtime,
   but live-query scheduling is not pulled into this slice.

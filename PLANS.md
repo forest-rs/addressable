@@ -1,40 +1,73 @@
-# Addressable tree runtime consumer slice
+# Addressable 0.1 release evidence
 
 ## Goal
 
-Turn the first real Exedra consumer into subtraction by moving reusable rooted
-tree resolution and query execution into a small `no_std + alloc`
-`addressable_tree` crate. Exedra should retain its storage and domain policies
-while deleting its custom path type, recursive path lookup, and consumer-local
-assembly-query executor. Preserve the revision clock across extraction, and
-make in-place commits the normal mutation path.
+Prepare `addressable` and `addressable_tree` for a first `0.1.0` release only
+after their public contracts have survived independent consumer use. Bring
+forward API corrections that concrete consumers expose, then package the two
+reusable crates without publishing, tagging, or landing consumer branches.
+
+## Fence
+
+Addressable owns durable addressing and shared interaction semantics; it
+explicitly does not own consumer storage, UI state, presence reduction,
+collaboration algorithms, or composition policy.
 
 ## Non-goals
 
-- A compulsory storage engine or index.
-- Generic endpoint value or mutation traits before a second domain proves them.
-- Async execution, persistence, or a textual query language.
+- Publishing crates, creating a release, or merging consumer work.
+- Generalizing the reference-specific tooling adapter without a second real
+  schema-backed adapter.
+- Adding a textual query language, universal evaluator, collaboration model,
+  or speculative revision branches.
+- Counting an adapter as evidence merely because its types compile.
 
-## Steps
+## Evidence sequence
 
-1. Define a host-owned node projection trait and reusable tree runtime.
-2. Prove exact, relative, pinned, cardinality, budget, deduplication, handle,
-   suspend/resume, and in-place commit behavior in tests and rustdoc.
-3. Make the Basilica assembly projection a second `TreeHost`; retain its
-   dependency-specific evaluator only for graph and cross-view axes.
-4. Replace Exedra's `InstancePath` machinery with structured Addressable exact
-   addresses and a host-owned index.
-5. Implement the small tree projection in `exedra_assembly`, retain its material
-   explanation/edit policy, and remove Basilica-specific resolution/selection
-   helpers.
-6. Validate and submit the Addressable and Exedra changes as separate PRs.
+1. Audit the two proposed release crates for public invariants, documentation,
+   package contents, and commitments that known near-term work would overturn.
+2. Adapt Overstory's retained inspection tree to `addressable_tree`. Require the
+   integration to replace traversal or selection glue and demonstrate rich
+   resolution, pins, or budgeted queries against real snapshots.
+3. Adapt a Layerstack composed stage without moving interned path, storage, or
+   composition ownership. Require it to expose a genuine tree-host seam and to
+   preserve Layerstack's path semantics.
+4. Explore a Ruthere presence facet that carries current Addressable focus. Keep
+   presence and collaboration separate, and retain this consumer only if it
+   exercises locator or pin semantics rather than adding decorative wrapping.
+5. Fold only consumer-earned corrections into Addressable. Record meaningful
+   public semantic changes in an ADR and migration note.
+6. Prepare release notes and package metadata for `addressable` and
+   `addressable_tree`; keep the reference, tooling, and tour packages
+   unpublished.
+7. Run package inspection plus the full workspace gates, review the resulting
+   API and consumer diffs, and open draft or review-ready PRs without merging.
+
+## Evidence so far
+
+- Overstory can borrow a retained inspection snapshot at its existing revision
+  and resolve, query, budget, pin, and recover generational handles. The adapter
+  is additive and does not replace Overstory's topology-aware live outline
+  patch, so it is evidence for the core API rather than a consumer PR yet.
+- Layerstack can borrow a composed `Stage` without leaking `PathId` into durable
+  identity. It exposed the need for host-reported predicate work: composed
+  field matching now charges one unit to find the field stack plus one per
+  opinion.
+- Ruthere can carry a typed pin as an application-owned presence facet through
+  its real visibility, replacement, cursor, and expiry behavior. It exposed
+  unsafe manual pin construction and the need to state that current `SpaceId`
+  text is runtime-scoped. Addressable does not absorb Ruthere presence or any
+  collaboration algorithm.
 
 ## Risks
 
-- A trait shaped too narrowly around Exedra. Prove the assembly seam against
-  both Exedra and the Basilica reference domain while leaving Basilica's graph
-  axes domain-owned.
-- Runtime mutation bypassing revisions. Expose immutable host access, preserve
-  the clock on extraction, and provide an in-place commit that advances once.
-- Treating exact address text as domain storage. Hosts store structured
-  `AbsoluteAddress` values; string forms remain serialization only.
+- A UI-tree or USD-tree adapter may accidentally make Addressable own labels,
+  storage, or domain traversal policy. Keep those decisions in the host.
+- Runtime `SpaceId` values may be mistaken for durable cross-process space
+  names when locators enter presence or tooling payloads. Either make that
+  lifetime explicit or add a consumer-earned durable envelope before release.
+- Existing reference and tooling crates demonstrate breadth but are not yet
+  reusable production boundaries. Do not publish them or describe their
+  reference-specific schemas as a stable generic protocol.
+- Consumer branches can become dependency tangles. Use adapters and examples,
+  preserve one-way dependencies, and avoid cross-consumer coupling.

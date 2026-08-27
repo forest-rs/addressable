@@ -163,10 +163,27 @@ impl<S> Revision<S> {
         self.sequence
     }
 
-    /// Returns the next revision in the same space, wrapping only after `u64::MAX`.
+    /// Returns the next revision in the same space.
+    ///
+    /// # Panics
+    ///
+    /// Panics when the host-owned sequence is exhausted. Revision reuse would
+    /// allow stale pins, guards, and handles to appear current again. Hosts
+    /// that need to handle exhaustion explicitly can use
+    /// [`Self::checked_next`].
     #[must_use]
     pub const fn next(self) -> Self {
-        Self::new(self.space, self.sequence.wrapping_add(1))
+        self.checked_next()
+            .expect("address-space revisions exhausted")
+    }
+
+    /// Returns the next revision, or `None` when the sequence is exhausted.
+    #[must_use]
+    pub const fn checked_next(self) -> Option<Self> {
+        match self.sequence.checked_add(1) {
+            Some(sequence) => Some(Self::new(self.space, sequence)),
+            None => None,
+        }
     }
 }
 
@@ -413,5 +430,20 @@ mod tests {
             "occurrences remain distinct"
         );
         assert_ne!(a, b, "location equality includes occurrence context");
+    }
+
+    #[test]
+    #[should_panic(expected = "address-space revisions exhausted")]
+    fn revision_exhaustion_does_not_wrap() {
+        let revision = Revision::new(SpaceId::<Space>::new(1), u64::MAX);
+
+        let _ = revision.next();
+    }
+
+    #[test]
+    fn revision_exhaustion_can_be_reported_without_panicking() {
+        let revision = Revision::new(SpaceId::<Space>::new(1), u64::MAX);
+
+        assert_eq!(revision.checked_next(), None);
     }
 }
