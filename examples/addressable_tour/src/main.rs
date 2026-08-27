@@ -77,11 +77,11 @@ fn addresses_and_identity(basilica: &Basilica) -> FeatureId {
         "north and south appearances must remain distinct",
     );
 
-    let pinned = Pinned::new(north_locator, *north.referent(), basilica.revision());
+    let pinned = Pinned::from_location(&north);
     let pinned_document = pinned.to_string();
     let decoded_pin = pinned_document
         .parse::<Pinned<BasilicaSpace, BasilicaView, FeatureId>>()
-        .expect("canonical pin must parse");
+        .expect("runtime-scoped pin must parse");
     assert_eq!(
         decoded_pin, pinned,
         "pinned locator serialization must round-trip",

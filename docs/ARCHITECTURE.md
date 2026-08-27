@@ -21,6 +21,13 @@ Type-level space markers should prevent accidental interchange between domains
 where possible. Runtime space identity is still needed when multiple instances
 of one typed space coexist.
 
+`SpaceId` is runtime identity, not a durable global name. Consequently,
+formatted `Locator` and `Pinned` values are safe only within a lifetime or
+protocol that preserves the same space-id assignment. A future persisted or
+cross-process envelope needs a durable, namespaced space identity and version;
+the typed runtime core must not imply that contract before a transport consumer
+can prove it.
+
 ### Referent and occurrence
 
 A referent is the semantic thing. An occurrence is one contextual appearance of
@@ -42,6 +49,11 @@ the same referent.
   results. It is not generally valid as a key.
 - A `Pinned` reference combines a locator with an expected identity, revision,
   or fingerprint and must report rebinding rather than silently accepting it.
+
+A pin is formed from one resolved `Location`, using that location's canonical
+exact address, referent, and revision together. This prevents callers from
+accidentally mixing evidence from different resolutions or retaining relative
+navigation as a rebinding recipe.
 
 ### Endpoint and edge
 
@@ -214,7 +226,9 @@ The initial implementation should turn these into tests or conformance cases:
 5. Occurrence equality does not imply or erase referent equality.
 6. Query ordering and deduplication are deterministic when requested.
 7. Traversal terminates under declared cycle and budget policy.
-8. Live delta replay agrees with full recomputation.
+8. Live delta replay agrees with full recomputation. Changes advance
+   monotonically within one space and live-query stream; an empty same-revision
+   poll is a no-op.
 9. Failed guarded transactions have no partial observable effect.
 10. Correspondence composition preserves ambiguity and provenance.
 11. Typed and dynamic execution agree for representable queries and operations.

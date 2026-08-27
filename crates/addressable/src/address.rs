@@ -12,7 +12,7 @@ use core::{
     str::FromStr,
 };
 
-use crate::{Revision, SpaceId};
+use crate::{Location, Revision, SpaceId};
 
 /// One validated address segment.
 ///
@@ -71,7 +71,7 @@ pub enum NameError {
 ///
 /// Callers normally obtain one with [`Self::parse`], then place it in an exact
 /// [`Locator`] or use it as the base of a relative locator. Hosts retain the
-/// canonical address in each resolved [`Location`](crate::Location).
+/// canonical address in each resolved [`Location`].
 pub struct AbsoluteAddress<S> {
     segments: Box<[Name]>,
     marker: PhantomData<fn() -> S>,
@@ -407,9 +407,11 @@ pub enum LocatorKind<S> {
 /// A view-qualified resolution recipe in one runtime space instance.
 ///
 /// Callers construct locators and pass them to a domain host's resolution API.
-/// Successful resolution normally produces a [`Location`](crate::Location).
-/// Exact and relative locators both retain their structured form and can be
-/// serialized when `V` implements [`core::fmt::Display`].
+/// Successful resolution normally produces a [`Location`].
+/// Exact and relative locators both retain their structured form. Their
+/// [`Display`](core::fmt::Display) and [`FromStr`] representations are
+/// runtime-scoped because [`SpaceId`] is runtime identity; do not persist or
+/// exchange that text unless the host preserves the same space-id assignment.
 ///
 /// ```
 /// use addressable::{AbsoluteAddress, Locator, RelativeAddress, SpaceId};
@@ -538,7 +540,7 @@ where
     }
 }
 
-/// Failure to parse a canonical [`Locator`] document.
+/// Failure to parse a runtime-scoped textual [`Locator`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LocatorParseError<E> {
     /// Length prefixes or structural separators were malformed.
@@ -553,13 +555,37 @@ pub enum LocatorParseError<E> {
 
 /// A locator pinned to expected semantic identity and revision.
 ///
-/// Create a pin from a successfully resolved location when later resolution
-/// must not silently accept staleness, movement, or rebinding. A domain host's
-/// pinned-resolution API interprets the preconditions and returns a rich
+/// Create a pin with [`Pinned::from_location`] after successful resolution when
+/// later resolution must not silently accept staleness, movement, or rebinding.
+/// The pin uses the location's canonical exact address and captures its
+/// referent and revision as one observation. A domain host's pinned-resolution
+/// API interprets those preconditions and returns a rich
 /// [`Resolution`](crate::Resolution) outcome.
-/// Use the original locator, the returned [`Location::referent`](crate::Location::referent),
-/// and its [`Location::revision`](crate::Location::revision) together; mixing
-/// observations from different resolutions defeats the pin's meaning.
+///
+/// Like [`Locator`] text, the [`Display`](core::fmt::Display) and [`FromStr`]
+/// representation is runtime-scoped because it contains a [`SpaceId`].
+///
+/// ```
+/// use addressable::{AbsoluteAddress, Location, Pinned, Revision, SpaceId};
+///
+/// enum Space {}
+/// #[derive(Clone, Debug, PartialEq, Eq)]
+/// enum View { Assembly }
+///
+/// let space = SpaceId::<Space>::new(7);
+/// let location = Location::new(
+///     View::Assembly,
+///     Revision::new(space, 3),
+///     42_u64,
+///     9_u64,
+///     AbsoluteAddress::parse("/basilica/nave")?,
+/// );
+/// let pinned = Pinned::from_location(&location);
+///
+/// assert_eq!(pinned.expected_referent(), &42);
+/// assert_eq!(pinned.expected_revision(), location.revision());
+/// # Ok::<(), addressable::AddressError>(())
+/// ```
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Pinned<S, V, I> {
     locator: Locator<S, V>,
@@ -568,13 +594,29 @@ pub struct Pinned<S, V, I> {
 }
 
 impl<S, V, I> Pinned<S, V, I> {
-    /// Pins a locator to identity observed at `expected_revision`.
+    /// Pins one successfully resolved location as a canonical exact locator.
     ///
-    /// The locator, identity, and revision must come from one successful
-    /// resolution. Addressable stores that evidence; the resolving host checks
-    /// it when the pin is used.
+    /// This constructor captures the address, referent identity, and revision
+    /// from the same observation, so callers cannot accidentally mix evidence
+    /// from different resolutions.
     #[must_use]
-    pub const fn new(
+    pub fn from_location<O>(location: &Location<S, V, I, O>) -> Self
+    where
+        V: Clone,
+        I: Clone,
+    {
+        Self {
+            locator: Locator::exact(
+                location.space(),
+                location.view().clone(),
+                location.address().clone(),
+            ),
+            expected_referent: location.referent().clone(),
+            expected_revision: location.revision(),
+        }
+    }
+
+    const fn from_parts(
         locator: Locator<S, V>,
         expected_referent: I,
         expected_revision: Revision<S>,
@@ -635,7 +677,7 @@ where
 
     fn from_str(text: &str) -> Result<Self, Self::Err> {
         let (locator, rest) = take_length_prefixed(text).ok_or(PinnedParseError::InvalidSyntax)?;
-        let locator = locator.parse().map_err(PinnedParseError::InvalidLocator)?;
+        let locator: Locator<S, V> = locator.parse().map_err(PinnedParseError::InvalidLocator)?;
         let (identity, revision) =
             take_length_prefixed(rest).ok_or(PinnedParseError::InvalidSyntax)?;
         let revision = revision
@@ -653,15 +695,15 @@ where
         let revision = revision
             .parse::<u64>()
             .map_err(|_| PinnedParseError::InvalidRevision)?;
-        Ok(Self::new(
-            locator,
-            identity,
-            Revision::new(SpaceId::new(revision_space), revision),
-        ))
+        let expected_revision = Revision::new(SpaceId::new(revision_space), revision);
+        if locator.space() != expected_revision.space() {
+            return Err(PinnedParseError::SpaceMismatch);
+        }
+        Ok(Self::from_parts(locator, identity, expected_revision))
     }
 }
 
-/// Failure to parse a canonical [`Pinned`] document.
+/// Failure to parse a runtime-scoped textual [`Pinned`] value.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PinnedParseError<V, I> {
     /// Length prefixes or structural separators were malformed.
@@ -672,6 +714,8 @@ pub enum PinnedParseError<V, I> {
     InvalidIdentity(I),
     /// Expected revision was not a `u64`.
     InvalidRevision,
+    /// The locator and expected revision name different runtime spaces.
+    SpaceMismatch,
 }
 
 fn take_length_prefixed(text: &str) -> Option<(&str, &str)> {
@@ -686,7 +730,7 @@ mod tests {
     use alloc::string::ToString;
 
     use super::{AbsoluteAddress, AddressError, Locator, Pinned, RelativeAddress};
-    use crate::{Revision, SpaceId};
+    use crate::{Location, Revision, SpaceId};
 
     #[derive(Debug, PartialEq, Eq)]
     struct Space;
@@ -760,7 +804,16 @@ mod tests {
             relative
         );
 
-        let pinned = Pinned::new(relative, 42_u64, Revision::new(SpaceId::new(7), 9));
+        let pinned_location = Location::new(
+            2,
+            Revision::new(SpaceId::new(7), 9),
+            42_u64,
+            3_u64,
+            relative
+                .to_absolute()
+                .expect("relative locator materializes"),
+        );
+        let pinned = Pinned::from_location(&pinned_location);
         let pinned_text = pinned.to_string();
         assert_eq!(
             pinned_text
@@ -768,5 +821,29 @@ mod tests {
                 .expect("pinned locator parses"),
             pinned
         );
+    }
+
+    #[test]
+    fn pinned_document_rejects_disagreeing_space_identities() {
+        let locator = Locator::<Space, u8>::exact(
+            SpaceId::new(7),
+            2,
+            AbsoluteAddress::parse("/basilica/nave").expect("valid exact address"),
+        );
+        let locator_text = locator.to_string();
+        let text = alloc::format!(
+            "{}:{}{}:{}:{}:{}",
+            locator_text.len(),
+            locator_text,
+            2,
+            42,
+            8,
+            9
+        );
+
+        assert!(matches!(
+            text.parse::<Pinned<Space, u8, u64>>(),
+            Err(super::PinnedParseError::SpaceMismatch)
+        ));
     }
 }

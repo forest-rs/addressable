@@ -106,9 +106,13 @@ on the workflow types use the same call paths and run as doctests.
   traversal budgets are explicit.
 - Pinned resolution reports stale, moved, or rebound outcomes instead of
   silently accepting a different referent.
+- `Pinned::from_location` captures exact address, referent, and revision from
+  one observation. `SpaceId` and textual locator/pin forms are runtime-scoped,
+  not durable cross-process names.
 - Guarded transactions validate every operation before applying any operation.
 - Replaying a query delta produces the same snapshot as full recomputation;
-  another space or live-query stream is rejected atomically.
+  another space, live-query stream, regressing revision, or unclocked change is
+  rejected atomically.
 - Correspondence preserves one-to-many mappings and provenance, and composed
   mapping legs cannot disagree about their connecting source.
 - Dynamic tooling recovers a declared schema and uses the same typed guarded

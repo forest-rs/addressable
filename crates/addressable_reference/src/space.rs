@@ -13,7 +13,7 @@ use addressable::{
     QueryResults, QuerySemantics, QueryStats, QueryStep, Resolution, ResolvedHandle,
     ResultOrdering, Revision, SpaceId, TraversalBudget, VisitIdentity,
 };
-use addressable_tree::{HostNode, TreeAxis, TreeHost, TreeNode, TreeRuntime};
+use addressable_tree::{HostNode, PredicateMatch, TreeAxis, TreeHost, TreeNode, TreeRuntime};
 
 use crate::model::{
     BasilicaAxis, BasilicaLocation, BasilicaLocator, BasilicaPredicate, BasilicaQuery,
@@ -165,10 +165,9 @@ impl Basilica {
 
     /// Resolves a pinned locator without silently accepting rebinding.
     ///
-    /// Form the pin from one successful resolution: retain the locator and pair
-    /// it with the returned location's referent and revision. The result then
-    /// distinguishes a still-valid target from movement, rebinding, staleness,
-    /// absence, and ambiguity.
+    /// Form the pin from one successful resolution with
+    /// [`Pinned::from_location`]. The result then distinguishes a still-valid
+    /// target from movement, rebinding, staleness, absence, and ambiguity.
     ///
     /// ```
     /// use addressable::{Pinned, Resolution, SpaceId};
@@ -179,7 +178,7 @@ impl Basilica {
     /// let Resolution::Resolved(root) = space.resolve(&locator) else {
     ///     panic!("reference root must resolve");
     /// };
-    /// let pinned = Pinned::new(locator, *root.referent(), root.revision());
+    /// let pinned = Pinned::from_location(&root);
     /// let Resolution::Resolved(root_again) = space.resolve_pinned(&pinned) else {
     ///     panic!("unchanged pin must resolve");
     /// };
@@ -418,7 +417,7 @@ impl Basilica {
     }
 
     fn assembly_runtime(&self) -> TreeRuntime<&Self> {
-        TreeRuntime::resume(self.revision, self)
+        TreeRuntime::from_revision(self.revision, self)
     }
 
     fn assembly_query<C: Cardinality>(
@@ -719,16 +718,17 @@ impl TreeHost for Basilica {
         (parent.view == *view).then(|| self.projected_node(parent))
     }
 
-    fn matches(&self, node: &HostNode<Self>, predicate: &Self::Predicate) -> bool {
+    fn matches(&self, node: &HostNode<Self>, predicate: &Self::Predicate) -> PredicateMatch {
         let Some(feature) = self.feature(*node.referent()) else {
-            return false;
+            return PredicateMatch::new(false, 1);
         };
-        match predicate {
+        let matched = match predicate {
             BasilicaPredicate::Any => true,
             BasilicaPredicate::Kind(kind) => feature.kind == *kind,
             BasilicaPredicate::LoadAtLeast(threshold) => feature.effective_load() >= *threshold,
             BasilicaPredicate::NameContains(fragment) => feature.name.contains(fragment),
-        }
+        };
+        PredicateMatch::new(matched, 1)
     }
 }
 
@@ -840,7 +840,7 @@ mod tests {
         assert_eq!(north.referent(), south.referent());
         assert_ne!(north.occurrence(), south.occurrence());
 
-        let pinned = Pinned::new(exact, *north.referent(), space.revision());
+        let pinned = Pinned::from_location(&north);
         space
             .occurrences
             .iter_mut()

@@ -10,7 +10,7 @@
 //!
 //! ```
 //! use addressable::{AbsoluteAddress, Query, Resolution, SpaceId};
-//! use addressable_tree::{TreeAxis, TreeHost, TreeNode, TreeRuntime};
+//! use addressable_tree::{PredicateMatch, TreeAxis, TreeHost, TreeNode, TreeRuntime};
 //!
 //! #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 //! enum View { Instances }
@@ -60,8 +60,12 @@
 //!         None
 //!     }
 //!
-//!     fn matches(&self, _node: &TreeNode<Space, u64, u64, u32>, predicate: &Predicate) -> bool {
-//!         *predicate == Predicate::Any
+//!     fn matches(
+//!         &self,
+//!         _node: &TreeNode<Space, u64, u64, u32>,
+//!         predicate: &Predicate,
+//!     ) -> PredicateMatch {
+//!         PredicateMatch::new(*predicate == Predicate::Any, 1)
 //!     }
 //! }
 //!
@@ -146,6 +150,30 @@ impl<S, R, O, H> TreeNode<S, R, O, H> {
     }
 }
 
+/// Result of evaluating one host-owned predicate against a projected node.
+///
+/// [`TreeRuntime`] adds `work` to
+/// [`QueryStats::work_units`](addressable::QueryStats::work_units). Hosts choose
+/// a stable unit meaningful for their domain: a constant in-memory comparison
+/// commonly costs one, while resolving an opinion stack or consulting an
+/// external index may cost more. The work value may be zero for a cached result
+/// that performs no observable host work.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PredicateMatch {
+    /// Whether the node satisfies the predicate.
+    pub matched: bool,
+    /// Host-defined work performed to decide the match.
+    pub work: u32,
+}
+
+impl PredicateMatch {
+    /// Reports a predicate result and its host-defined work.
+    #[must_use]
+    pub const fn new(matched: bool, work: u32) -> Self {
+        Self { matched, work }
+    }
+}
+
 /// Host-owned projection required by [`TreeRuntime`].
 ///
 /// The host retains storage and indexing choices. Every method observes one
@@ -203,8 +231,13 @@ pub trait TreeHost: Sized {
     /// Projects the parent of one occurrence, if it has one.
     fn parent(&self, view: &Self::View, occurrence: &Self::Occurrence) -> Option<HostNode<Self>>;
 
-    /// Evaluates one domain predicate against a projected node.
-    fn matches(&self, node: &HostNode<Self>, predicate: &Self::Predicate) -> bool;
+    /// Evaluates one domain predicate and reports the work it performed.
+    ///
+    /// The runtime charges the returned [`PredicateMatch::work`] against the
+    /// query's
+    /// [`TraversalBudget::max_work`](addressable::TraversalBudget::max_work).
+    /// A constant in-memory comparison normally reports one work unit.
+    fn matches(&self, node: &HostNode<Self>, predicate: &Self::Predicate) -> PredicateMatch;
 }
 
 impl<H: TreeHost> TreeHost for &H {
@@ -251,7 +284,7 @@ impl<H: TreeHost> TreeHost for &H {
         H::parent(self, view, occurrence)
     }
 
-    fn matches(&self, node: &HostNode<Self>, predicate: &Self::Predicate) -> bool {
+    fn matches(&self, node: &HostNode<Self>, predicate: &Self::Predicate) -> PredicateMatch {
         H::matches(self, node, predicate)
     }
 }
@@ -307,8 +340,10 @@ pub type TreeQuery<H, C = Many> = Query<TreeLocator<H>, TreeAxis, <H as TreeHost
 ///
 /// Construct this with [`Self::new`]. It exposes immutable host access so no
 /// mutation can bypass its revision. Domain code validates an operation, then
-/// applies it through [`Self::commit`]. [`Self::into_host`] and [`Self::resume`]
-/// preserve the clock when ownership must cross a boundary.
+/// applies it through [`Self::commit`]. [`Self::into_host`] and
+/// [`Self::from_revision`] preserve the clock when ownership must cross a
+/// boundary. Hosts that already own a revision use the same constructor to
+/// lend a coherent snapshot to the runtime.
 #[derive(Clone, Debug)]
 pub struct TreeRuntime<H: TreeHost> {
     id: SpaceId<H::Space>,
@@ -318,11 +353,12 @@ pub struct TreeRuntime<H: TreeHost> {
 
 struct AdvanceRevision<'a, S> {
     revision: &'a mut Revision<S>,
+    next: Revision<S>,
 }
 
 impl<S> Drop for AdvanceRevision<'_, S> {
     fn drop(&mut self) {
-        *self.revision = self.revision.next();
+        *self.revision = self.next;
     }
 }
 
@@ -330,8 +366,8 @@ impl<H: TreeHost> TreeRuntime<H> {
     /// Binds a host value to one runtime address-space identity.
     ///
     /// `id` must identify a genuinely new space instance. Restore an extracted
-    /// instance with [`Self::resume`]; reusing its id with `new` would restart
-    /// the clock and could make stale observations appear current.
+    /// instance with [`Self::from_revision`]; reusing its id with `new` would
+    /// restart the clock and could make stale observations appear current.
     #[must_use]
     pub fn new(id: SpaceId<H::Space>, host: H) -> Self {
         Self {
@@ -341,12 +377,13 @@ impl<H: TreeHost> TreeRuntime<H> {
         }
     }
 
-    /// Restores a host with its previously recorded runtime revision.
+    /// Binds a host value at an existing host-owned revision.
     ///
-    /// Use the values returned by [`Self::into_host`]. The revision already
-    /// carries the owning [`SpaceId`], so a mismatched pair cannot be supplied.
+    /// Use this for a host snapshot that already owns its revision, including
+    /// the values returned by [`Self::into_host`]. The revision already carries
+    /// the owning [`SpaceId`], so a mismatched pair cannot be supplied.
     #[must_use]
-    pub const fn resume(revision: Revision<H::Space>, host: H) -> Self {
+    pub const fn from_revision(revision: Revision<H::Space>, host: H) -> Self {
         Self {
             id: revision.space(),
             revision,
@@ -374,8 +411,9 @@ impl<H: TreeHost> TreeRuntime<H> {
 
     /// Recovers the revision and host value, consuming the live runtime.
     ///
-    /// Pass both values to [`Self::resume`] to restore the same clock. Mutation
-    /// should normally remain inside the runtime through [`Self::commit`].
+    /// Pass both values to [`Self::from_revision`] to restore the same clock.
+    /// Mutation should normally remain inside the runtime through
+    /// [`Self::commit`].
     #[must_use]
     pub fn into_host(self) -> (Revision<H::Space>, H) {
         (self.revision, self.host)
@@ -389,9 +427,11 @@ impl<H: TreeHost> TreeRuntime<H> {
     /// revision also advances if the closure unwinds after partially mutating
     /// the host, so a caught panic cannot leave changed data at the old clock.
     pub fn commit<T>(&mut self, mutation: impl FnOnce(&mut H) -> T) -> (Revision<H::Space>, T) {
+        let next = self.revision.next();
         let value = {
             let _advance = AdvanceRevision {
                 revision: &mut self.revision,
+                next,
             };
             mutation(&mut self.host)
         };
@@ -404,8 +444,9 @@ impl<H: TreeHost> TreeRuntime<H> {
     /// precondition and successfully applying every operation to a private
     /// replacement value. Dry runs and no-op batches retain the current host.
     pub fn replace_host(&mut self, host: H) -> Revision<H::Space> {
+        let next = self.revision.next();
         self.host = host;
-        self.revision = self.revision.next();
+        self.revision = next;
         self.revision
     }
 
@@ -581,12 +622,14 @@ impl<H: TreeHost> TreeRuntime<H> {
                     self.traverse(locator.view(), &frontier, *axis, semantics, &mut stats)?
                 }
                 QueryStep::Filter(predicate) => {
-                    let inspected = u32::try_from(frontier.len()).unwrap_or(u32::MAX);
-                    let filtered = frontier
-                        .into_iter()
-                        .filter(|node| self.host.matches(node, predicate))
-                        .collect();
-                    stats.charge_work(semantics.budget, inspected)?;
+                    let mut filtered = Vec::with_capacity(frontier.len());
+                    for node in frontier {
+                        let predicate_match = self.host.matches(&node, predicate);
+                        stats.charge_work(semantics.budget, predicate_match.work)?;
+                        if predicate_match.matched {
+                            filtered.push(node);
+                        }
+                    }
                     filtered
                 }
             };
@@ -752,10 +795,10 @@ mod tests {
 
     use addressable::{
         AbsoluteAddress, Deduplication, Locator, Pinned, Query, QueryError, RelativeAddress,
-        Resolution, SpaceId, TraversalBudget,
+        Resolution, Revision, SpaceId, TraversalBudget,
     };
 
-    use super::{TreeAxis, TreeHost, TreeNode, TreeReadError, TreeRuntime};
+    use super::{PredicateMatch, TreeAxis, TreeHost, TreeNode, TreeReadError, TreeRuntime};
 
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Space {}
@@ -769,6 +812,7 @@ mod tests {
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum Predicate {
         Referent(u64),
+        Expensive,
     }
 
     #[derive(Clone, Debug)]
@@ -783,6 +827,7 @@ mod tests {
     struct Host {
         nodes: Vec<StoredNode>,
         node_lookups: Cell<u32>,
+        predicate_work: Cell<u32>,
     }
 
     impl Host {
@@ -796,6 +841,7 @@ mod tests {
                     stored(4, 20, Some(2), "/root/a/leaf"),
                 ],
                 node_lookups: Cell::new(0),
+                predicate_work: Cell::new(0),
             }
         }
 
@@ -861,9 +907,20 @@ mod tests {
                 .map(Self::project)
         }
 
-        fn matches(&self, node: &TreeNode<Space, u64, u64, u64>, predicate: &Predicate) -> bool {
+        fn matches(
+            &self,
+            node: &TreeNode<Space, u64, u64, u64>,
+            predicate: &Predicate,
+        ) -> PredicateMatch {
             match predicate {
-                Predicate::Referent(referent) => node.referent() == referent,
+                Predicate::Referent(referent) => {
+                    PredicateMatch::new(node.referent() == referent, 1)
+                }
+                Predicate::Expensive => {
+                    self.predicate_work
+                        .set(self.predicate_work.get().saturating_add(4));
+                    PredicateMatch::new(true, 4)
+                }
             }
         }
     }
@@ -906,7 +963,7 @@ mod tests {
             "exact and relative recipes reach one location"
         );
 
-        let pin = Pinned::new(exact, *exact_location.referent(), exact_location.revision());
+        let pin = Pinned::from_location(&exact_location);
         assert!(
             matches!(runtime.resolve_pinned(&pin), Resolution::Resolved(_)),
             "fresh pin resolves normally"
@@ -969,6 +1026,24 @@ mod tests {
     }
 
     #[test]
+    fn predicate_evaluation_reports_host_defined_work() {
+        let runtime = runtime();
+        let results = runtime
+            .query_many(
+                &Query::many(runtime.root_locator(View::Instances))
+                    .traverse(TreeAxis::Descendants)
+                    .filter(Predicate::Expensive),
+            )
+            .expect("query stays within the default budget");
+
+        assert_eq!(
+            results.stats().work_units,
+            5 + runtime.host().predicate_work.get(),
+            "query statistics must report the work the host performed"
+        );
+    }
+
+    #[test]
     fn budget_failure_and_host_replacement_are_revision_safe() {
         let mut runtime = runtime();
         let query = Query::many(runtime.root_locator(View::Instances))
@@ -1015,7 +1090,7 @@ mod tests {
     }
 
     #[test]
-    fn commit_and_resume_preserve_the_revision_clock() {
+    fn commit_and_reconstruction_preserve_the_revision_clock() {
         let mut runtime = runtime();
         let locator = Locator::exact(
             runtime.id(),
@@ -1025,7 +1100,7 @@ mod tests {
         let Resolution::Resolved(location) = runtime.resolve(&locator) else {
             panic!("pin target resolves");
         };
-        let pin = Pinned::new(locator, *location.referent(), location.revision());
+        let pin = Pinned::from_location(&location);
 
         runtime.commit(|host| host.nodes.reverse());
         assert!(matches!(
@@ -1034,10 +1109,10 @@ mod tests {
         ));
 
         let (revision, host) = runtime.into_host();
-        let resumed = TreeRuntime::resume(revision, host);
-        assert_eq!(resumed.revision(), revision);
+        let reconstructed = TreeRuntime::from_revision(revision, host);
+        assert_eq!(reconstructed.revision(), revision);
         assert!(matches!(
-            resumed.resolve_pinned(&pin),
+            reconstructed.resolve_pinned(&pin),
             Resolution::StaleRevision { .. }
         ));
     }
@@ -1056,5 +1131,31 @@ mod tests {
 
         assert!(outcome.is_err());
         assert_eq!(runtime.revision(), revision.next());
+    }
+
+    #[test]
+    fn exhausted_revision_rejects_host_changes_before_mutation() {
+        let space = SpaceId::new(7);
+        let revision = Revision::new(space, u64::MAX);
+        let mut runtime = TreeRuntime::from_revision(revision, Host::new());
+        let node_count = runtime.host().nodes.len();
+
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            runtime.commit(|host| host.nodes.clear());
+        }));
+
+        assert!(outcome.is_err());
+        assert_eq!(runtime.revision(), revision);
+        assert_eq!(runtime.host().nodes.len(), node_count);
+
+        let mut replacement = Host::new();
+        replacement.nodes.clear();
+        let outcome = catch_unwind(AssertUnwindSafe(|| {
+            runtime.replace_host(replacement);
+        }));
+
+        assert!(outcome.is_err());
+        assert_eq!(runtime.revision(), revision);
+        assert_eq!(runtime.host().nodes.len(), node_count);
     }
 }
