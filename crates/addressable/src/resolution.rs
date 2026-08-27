@@ -15,8 +15,7 @@ use crate::Revision;
 /// [`Self::resolved`] is for workflows where every exceptional outcome can be
 /// collapsed to absence.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[non_exhaustive]
-pub enum Resolution<S, T, I, A> {
+pub enum Resolution<S, T, I, A, C = String> {
     /// The locator resolved without violating its policy.
     Resolved(T),
     /// Nothing currently occupies the requested location.
@@ -58,12 +57,12 @@ pub enum Resolution<S, T, I, A> {
         reason: PartialReason,
     },
     /// The host does not expose a required capability in this view.
-    CapabilityUnavailable(String),
+    CapabilityUnavailable(C),
     /// A declared traversal budget was exhausted.
     BudgetExceeded(BudgetExceeded),
 }
 
-impl<S, T, I, A> Resolution<S, T, I, A> {
+impl<S, T, I, A, C> Resolution<S, T, I, A, C> {
     /// Returns the ordinary resolved value, if and only if no exceptional
     /// resolution state occurred.
     #[must_use]

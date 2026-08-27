@@ -63,3 +63,27 @@ was observed. Dynamic callers should copy those fields into
 `DynamicTransaction::{selection_space, selection_revision}` and
 `DynamicGuard::{expected_space, expected_revision}` instead of reaching through
 the adapter to typed host state.
+
+## Tree runtime revisions and host iteration
+
+`TreeRuntime::into_host` now returns `(Revision<S>, H)`. Restore that pair with
+`TreeRuntime::resume(revision, host)`; do not call `new` with an id belonging to
+an existing space instance. Apply already-validated mutations through
+`TreeRuntime::commit` so the revision advances without cloning the whole host.
+
+`TreeHost::nodes` and `TreeHost::children` now return iterators instead of
+appending to output vectors. Referent and occurrence identities must implement
+`Ord`, and hosts may override `occurrences_of` to use an index. A blanket
+implementation makes `&H` a read-only tree host whenever `H` is one.
+
+## Resolution and live change exhaustiveness
+
+`Resolution` is now exhaustive and accepts an optional fifth type parameter
+for the `CapabilityUnavailable` payload; it defaults to `String`. Match all
+variants directly, and select a domain capability type when free-form text is
+not appropriate.
+
+`QueryChange::Rebound` was removed because generic snapshot differencing could
+not produce it without typed referent evidence. Use `Updated` for observable
+value changes; a future rebound event must carry enough typed identity for the
+producer and replay logic to agree on its meaning.

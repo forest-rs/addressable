@@ -21,6 +21,7 @@ guarded edit, and observe a coherent live delta.
 | Crate | Boundary |
 |---|---|
 | `addressable` | Dependency-free `no_std + alloc` vocabulary, structured addresses, query IR, live deltas, guards, and correspondence |
+| `addressable_tree` | Reusable `no_std + alloc` resolution and query execution over host-owned rooted trees |
 | `addressable_reference` | `std` scanning basilica and catalog spaces exercising the complete lifecycle |
 | `addressable_tooling` | Schema-backed erased adapter that delegates to the typed reference API |
 | `addressable_tour` | Separate executable proof; no example-only dependencies enter production crates |
@@ -28,7 +29,7 @@ guarded edit, and observe a coherent live delta.
 Dependencies flow in one direction:
 
 ```text
-addressable <- addressable_reference <- addressable_tooling <- addressable_tour
+addressable <- addressable_tree <- addressable_reference <- addressable_tooling <- addressable_tour
 ```
 
 ## Typed use
@@ -120,7 +121,10 @@ path.
 See [`MANDATE.md`](MANDATE.md) for the durable purpose,
 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the mature design target,
 [`docs/adr/0001-initial-workspace-and-vertical-slice.md`](docs/adr/0001-initial-workspace-and-vertical-slice.md)
-for the initial crate decision, and [`STATUS.md`](STATUS.md) for current state.
+for the initial crate decision,
+[`docs/adr/0002-tree-runtime-from-exedra.md`](docs/adr/0002-tree-runtime-from-exedra.md)
+for the consumer-derived tree runtime, and [`STATUS.md`](STATUS.md) for current
+state.
 See [`docs/MIGRATION.md`](docs/MIGRATION.md) when updating code written against
 the earlier bootstrap draft.
 

@@ -12,6 +12,7 @@ publish = false
 
 [dependencies]
 addressable.workspace = true
+addressable_tree.workspace = true
 
 [lints]
 workspace = true

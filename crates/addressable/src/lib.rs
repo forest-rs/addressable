@@ -69,7 +69,7 @@ pub use live::{
     DeltaError, LiveQueryId, QueryChange, QueryDelta, QuerySnapshot, ResultEntry, ResultIdentity,
 };
 pub use query::{
-    Cardinality, CardinalityKind, CyclePolicy, Deduplication, Many, One, Optional, Query,
+    Cardinality, CardinalityKind, CyclePolicy, Deduplication, Many, Measured, One, Optional, Query,
     QueryError, QueryResults, QuerySemantics, QueryStats, QueryStep, ResultOrdering,
     TraversalBudget, VisitIdentity,
 };

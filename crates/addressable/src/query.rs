@@ -6,7 +6,7 @@
 use alloc::{boxed::Box, vec::Vec};
 use core::marker::PhantomData;
 
-use crate::BudgetExceeded;
+use crate::{BudgetDimension, BudgetExceeded};
 
 /// Marker for a query that must return exactly one result.
 ///
@@ -402,6 +402,93 @@ pub struct QueryStats {
     pub max_depth_reached: u32,
 }
 
+impl QueryStats {
+    /// Charges node visits, host work, and traversal depth against a budget.
+    ///
+    /// Query evaluators call this as work becomes observable. The first
+    /// exceeded dimension is returned with its limit and observed value.
+    pub fn charge(
+        &mut self,
+        budget: TraversalBudget,
+        nodes: u32,
+        work: u32,
+        depth: u32,
+    ) -> Result<(), QueryError> {
+        self.visited_nodes = self.visited_nodes.saturating_add(nodes);
+        self.work_units = self.work_units.saturating_add(work);
+        self.max_depth_reached = self.max_depth_reached.max(depth);
+        if depth > budget.max_depth {
+            return Err(QueryError::BudgetExceeded(BudgetExceeded::new(
+                BudgetDimension::Depth,
+                budget.max_depth,
+                depth,
+            )));
+        }
+        if self.visited_nodes > budget.max_nodes {
+            return Err(QueryError::BudgetExceeded(BudgetExceeded::new(
+                BudgetDimension::Nodes,
+                budget.max_nodes,
+                self.visited_nodes,
+            )));
+        }
+        if self.work_units > budget.max_work {
+            return Err(QueryError::BudgetExceeded(BudgetExceeded::new(
+                BudgetDimension::Work,
+                budget.max_work,
+                self.work_units,
+            )));
+        }
+        Ok(())
+    }
+
+    /// Charges only host-defined work at the current maximum depth.
+    pub fn charge_work(&mut self, budget: TraversalBudget, work: u32) -> Result<(), QueryError> {
+        self.charge(budget, 0, work, self.max_depth_reached)
+    }
+}
+
+/// A cardinality-shaped result paired with measured query work.
+///
+/// Hosts produce this from [`QueryResults::require_one`] or
+/// [`QueryResults::require_optional`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Measured<T> {
+    value: T,
+    stats: QueryStats,
+}
+
+impl<T> Measured<T> {
+    /// Pairs a cardinality-shaped result with its measured query work.
+    #[must_use]
+    pub const fn new(value: T, stats: QueryStats) -> Self {
+        Self { value, stats }
+    }
+
+    /// Returns the cardinality-shaped value.
+    #[must_use]
+    pub const fn value(&self) -> &T {
+        &self.value
+    }
+
+    /// Returns measured query work.
+    #[must_use]
+    pub const fn stats(&self) -> QueryStats {
+        self.stats
+    }
+
+    /// Decomposes the measured result.
+    #[must_use]
+    pub fn into_parts(self) -> (T, QueryStats) {
+        (self.value, self.stats)
+    }
+
+    /// Consumes the measurement and returns only its value.
+    #[must_use]
+    pub fn into_value(self) -> T {
+        self.value
+    }
+}
+
 /// Query items paired with measured execution work.
 ///
 /// A host returns this from many-result query execution. Callers inspect
@@ -438,6 +525,35 @@ impl<T> QueryResults<T> {
     #[must_use]
     pub fn into_parts(self) -> (Box<[T]>, QueryStats) {
         (self.items, self.stats)
+    }
+
+    /// Requires exactly one item while preserving measured work.
+    pub fn require_one(self) -> Result<Measured<T>, QueryError> {
+        let actual = self.items.len();
+        if actual != 1 {
+            return Err(QueryError::Cardinality {
+                expected: CardinalityKind::One,
+                actual,
+            });
+        }
+        let item = self
+            .items
+            .into_vec()
+            .pop()
+            .expect("cardinality was checked as exactly one");
+        Ok(Measured::new(item, self.stats))
+    }
+
+    /// Allows zero or one item while preserving measured work.
+    pub fn require_optional(self) -> Result<Measured<Option<T>>, QueryError> {
+        let actual = self.items.len();
+        if actual > 1 {
+            return Err(QueryError::Cardinality {
+                expected: CardinalityKind::Optional,
+                actual,
+            });
+        }
+        Ok(Measured::new(self.items.into_vec().pop(), self.stats))
     }
 }
 

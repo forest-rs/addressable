@@ -281,15 +281,6 @@ where
                     }
                     entries.insert(*to, entry);
                 }
-                QueryChange::Rebound { index, old, new } => {
-                    let Some(existing) = entries.get_mut(*index) else {
-                        return Err(DeltaError::IndexOutOfBounds { index: *index });
-                    };
-                    if existing != old || old.key != new.key {
-                        return Err(DeltaError::EntryMismatch);
-                    }
-                    *existing = new.clone();
-                }
             }
         }
 
@@ -336,15 +327,6 @@ pub enum QueryChange<K, T> {
         from: usize,
         /// New index.
         to: usize,
-    },
-    /// Keep result-entry identity while reporting a changed referent binding.
-    Rebound {
-        /// Stable index at this point in the delta stream.
-        index: usize,
-        /// Previous binding.
-        old: ResultEntry<K, T>,
-        /// New binding with the same result-entry key.
-        new: ResultEntry<K, T>,
     },
 }
 

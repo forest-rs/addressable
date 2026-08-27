@@ -1,0 +1,18 @@
+[package]
+name = "addressable_tree"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Reusable no_std Addressable execution for host-owned rooted trees"
+readme = "README.md"
+keywords = ["addressing", "tree", "query", "no_std"]
+categories = ["data-structures", "no-std"]
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+addressable.workspace = true

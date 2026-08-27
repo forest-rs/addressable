@@ -3,58 +3,23 @@
 
 //! Basilica construction, resolution, query execution, and typed reads.
 
-use std::{collections::VecDeque, vec::Vec};
+use std::collections::{BTreeSet, VecDeque};
+use std::vec::Vec;
 
+pub use addressable::Measured;
 use addressable::{
-    AbsoluteAddress, BudgetDimension, BudgetExceeded, Cardinality, CardinalityKind, CyclePolicy,
-    Deduplication, Endpoint, Explained, Locator, Many, One, Opinion, Optional, Pinned, QueryError,
+    AbsoluteAddress, BudgetDimension, BudgetExceeded, Cardinality, CyclePolicy, Deduplication,
+    Endpoint, Explained, Locator, Many, One, Opinion, Optional, Pinned, Query, QueryError,
     QueryResults, QuerySemantics, QueryStats, QueryStep, Resolution, ResolvedHandle,
     ResultOrdering, Revision, SpaceId, TraversalBudget, VisitIdentity,
 };
+use addressable_tree::{HostNode, TreeAxis, TreeHost, TreeNode, TreeRuntime};
 
 use crate::model::{
     BasilicaAxis, BasilicaLocation, BasilicaLocator, BasilicaPredicate, BasilicaQuery,
     BasilicaResolution, BasilicaSpace, BasilicaView, Edge, EdgeId, EdgeKind, Feature, FeatureId,
     FeatureKind, Load, LoadProvenance, LoadReason, Occurrence, OccurrenceId, SlotHandle,
 };
-
-/// Measured single-value or optional query output.
-///
-/// [`Basilica::query_one`] and [`Basilica::query_optional`] produce this shape
-/// so their cardinality-specific value does not lose the common query work
-/// measurements. Use [`Self::value`] for the result and [`Self::stats`] for
-/// diagnostics or budget tuning.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Measured<T> {
-    value: T,
-    stats: QueryStats,
-}
-
-impl<T> Measured<T> {
-    /// Pairs a cardinality-shaped value with measured query work for a host.
-    #[must_use]
-    pub const fn new(value: T, stats: QueryStats) -> Self {
-        Self { value, stats }
-    }
-
-    /// Returns the cardinality-shaped value.
-    #[must_use]
-    pub const fn value(&self) -> &T {
-        &self.value
-    }
-
-    /// Returns measured query work.
-    #[must_use]
-    pub const fn stats(&self) -> QueryStats {
-        self.stats
-    }
-
-    /// Decomposes the measured value.
-    #[must_use]
-    pub fn into_parts(self) -> (T, QueryStats) {
-        (self.value, self.stats)
-    }
-}
 
 /// The complete scanning reference basilica space.
 ///
@@ -181,6 +146,9 @@ impl Basilica {
     /// ```
     #[must_use]
     pub fn resolve(&self, locator: &BasilicaLocator) -> BasilicaResolution {
+        if *locator.view() == BasilicaView::Assembly {
+            return self.assembly_runtime().resolve(locator);
+        }
         if locator.space() != self.id {
             return Resolution::UnsupportedLocator;
         }
@@ -225,6 +193,9 @@ impl Basilica {
         pinned: &Pinned<BasilicaSpace, BasilicaView, FeatureId>,
     ) -> BasilicaResolution {
         let locator = pinned.locator();
+        if *locator.view() == BasilicaView::Assembly {
+            return self.assembly_runtime().resolve_pinned(pinned);
+        }
         if locator.space() != self.id {
             return Resolution::UnsupportedLocator;
         }
@@ -278,7 +249,11 @@ impl Basilica {
         &self,
         query: &BasilicaQuery<Many>,
     ) -> Result<QueryResults<BasilicaLocation>, QueryError> {
-        self.execute(query)
+        if let Some(query) = self.assembly_query(query) {
+            self.assembly_runtime().query_many(&query)
+        } else {
+            self.execute_custom(query)
+        }
     }
 
     /// Executes a query that requires exactly one result.
@@ -286,19 +261,10 @@ impl Basilica {
         &self,
         query: &BasilicaQuery<One>,
     ) -> Result<Measured<BasilicaLocation>, QueryError> {
-        let results = self.execute(query)?;
-        let (items, stats) = results.into_parts();
-        if items.len() != 1 {
-            return Err(QueryError::Cardinality {
-                expected: CardinalityKind::One,
-                actual: items.len(),
-            });
+        if let Some(query) = self.assembly_query(query) {
+            return self.assembly_runtime().query_one(&query);
         }
-        let item = items
-            .into_vec()
-            .pop()
-            .expect("cardinality was checked as exactly one");
-        Ok(Measured::new(item, stats))
+        self.execute_custom(query)?.require_one()
     }
 
     /// Executes a query that allows zero or one result.
@@ -306,15 +272,10 @@ impl Basilica {
         &self,
         query: &BasilicaQuery<Optional>,
     ) -> Result<Measured<Option<BasilicaLocation>>, QueryError> {
-        let results = self.execute(query)?;
-        let (items, stats) = results.into_parts();
-        if items.len() > 1 {
-            return Err(QueryError::Cardinality {
-                expected: CardinalityKind::Optional,
-                actual: items.len(),
-            });
+        if let Some(query) = self.assembly_query(query) {
+            return self.assembly_runtime().query_optional(&query);
         }
-        Ok(Measured::new(items.into_vec().pop(), stats))
+        self.execute_custom(query)?.require_optional()
     }
 
     /// Resolves a revision-scoped runtime feature slot.
@@ -412,6 +373,21 @@ impl Basilica {
             .find(|occurrence| occurrence.id == id)
     }
 
+    fn projected_node(&self, occurrence: &Occurrence) -> HostNode<Self> {
+        let slot = self
+            .features
+            .iter()
+            .position(|feature| feature.id == occurrence.referent)
+            .and_then(|index| u32::try_from(index).ok())
+            .map(SlotHandle::new);
+        TreeNode::new(
+            occurrence.referent,
+            occurrence.id,
+            occurrence.address.clone(),
+            slot,
+        )
+    }
+
     pub(crate) fn location(&self, occurrence: &Occurrence) -> BasilicaLocation {
         BasilicaLocation::new(
             occurrence.view,
@@ -441,7 +417,42 @@ impl Basilica {
         Ok(())
     }
 
-    fn execute<C: Cardinality>(
+    fn assembly_runtime(&self) -> TreeRuntime<&Self> {
+        TreeRuntime::resume(self.revision, self)
+    }
+
+    fn assembly_query<C: Cardinality>(
+        &self,
+        query: &BasilicaQuery<C>,
+    ) -> Option<Query<BasilicaLocator, TreeAxis, BasilicaPredicate, C>> {
+        if *query.start().view() != BasilicaView::Assembly {
+            return None;
+        }
+        let mut mapped = Query::<BasilicaLocator, TreeAxis, BasilicaPredicate, Many>::many(
+            query.start().clone(),
+        )
+        .with_cardinality::<C>();
+        for step in query.steps() {
+            mapped = match step {
+                QueryStep::Traverse(BasilicaAxis::Children) => mapped.traverse(TreeAxis::Children),
+                QueryStep::Traverse(BasilicaAxis::Descendants) => {
+                    mapped.traverse(TreeAxis::Descendants)
+                }
+                QueryStep::Traverse(_) => return None,
+                QueryStep::Filter(predicate) => mapped.filter(predicate.clone()),
+            };
+        }
+        let semantics = query.semantics();
+        Some(
+            mapped
+                .deduplicate(semantics.deduplication)
+                .order(semantics.ordering)
+                .cycles(semantics.cycle_policy)
+                .budget(semantics.budget),
+        )
+    }
+
+    fn execute_custom<C: Cardinality>(
         &self,
         query: &BasilicaQuery<C>,
     ) -> Result<QueryResults<BasilicaLocation>, QueryError> {
@@ -450,7 +461,7 @@ impl Basilica {
         };
         let semantics = query.semantics();
         let mut stats = QueryStats::default();
-        charge(&mut stats, semantics.budget, 1, 1, 0)?;
+        stats.charge(semantics.budget, 1, 1, 0)?;
         let mut frontier = vec![start];
 
         for step in query.steps() {
@@ -464,7 +475,7 @@ impl Basilica {
                         .into_iter()
                         .filter(|location| self.matches(location, predicate))
                         .collect();
-                    charge_work(&mut stats, semantics.budget, inspected)?;
+                    stats.charge_work(semantics.budget, inspected)?;
                     filtered
                 }
             };
@@ -538,7 +549,7 @@ impl Basilica {
                     for occurrence in self.occurrences.iter().filter(|occurrence| {
                         occurrence.view == view && occurrence.referent == *location.referent()
                     }) {
-                        charge(stats, semantics.budget, 1, 1, 1)?;
+                        stats.charge(semantics.budget, 1, 1, 1)?;
                         output.push(self.location(occurrence));
                     }
                 }
@@ -569,7 +580,7 @@ impl Basilica {
         }) {
             let target = if reverse { edge.from } else { edge.to };
             let occurrence = self.occurrence(target).ok_or(QueryError::UnsupportedStep)?;
-            charge(stats, budget, 1, 1, 1)?;
+            stats.charge(budget, 1, 1, 1)?;
             output.push(self.location(occurrence));
         }
         Ok(())
@@ -587,8 +598,8 @@ impl Basilica {
             BasilicaView::Dependency => EdgeKind::Dependency,
         };
         let mut queue = VecDeque::from([(*start.occurrence(), 0_u32)]);
-        let mut visited_occurrences = vec![*start.occurrence()];
-        let mut visited_referents = vec![*start.referent()];
+        let mut visited_occurrences = BTreeSet::from([*start.occurrence()]);
+        let mut visited_referents = BTreeSet::from([*start.referent()]);
 
         while let Some((current, depth)) = queue.pop_front() {
             for edge in self
@@ -608,12 +619,12 @@ impl Basilica {
                     )));
                 }
                 let revisited = match semantics.cycle_policy {
-                    CyclePolicy::Error => visited_occurrences.contains(&occurrence.id),
+                    CyclePolicy::Error => !visited_occurrences.insert(occurrence.id),
                     CyclePolicy::SkipVisited(VisitIdentity::Occurrence) => {
-                        visited_occurrences.contains(&occurrence.id)
+                        !visited_occurrences.insert(occurrence.id)
                     }
                     CyclePolicy::SkipVisited(VisitIdentity::Referent) => {
-                        visited_referents.contains(&occurrence.referent)
+                        !visited_referents.insert(occurrence.referent)
                     }
                 };
                 if revisited {
@@ -622,9 +633,9 @@ impl Basilica {
                     }
                     continue;
                 }
-                visited_occurrences.push(occurrence.id);
-                visited_referents.push(occurrence.referent);
-                charge(stats, semantics.budget, 1, 1, next_depth)?;
+                visited_occurrences.insert(occurrence.id);
+                visited_referents.insert(occurrence.referent);
+                stats.charge(semantics.budget, 1, 1, next_depth)?;
                 output.push(self.location(occurrence));
                 queue.push_back((occurrence.id, next_depth));
             }
@@ -634,6 +645,82 @@ impl Basilica {
 
     fn matches(&self, location: &BasilicaLocation, predicate: &BasilicaPredicate) -> bool {
         let Some(feature) = self.feature(*location.referent()) else {
+            return false;
+        };
+        match predicate {
+            BasilicaPredicate::Any => true,
+            BasilicaPredicate::Kind(kind) => feature.kind == *kind,
+            BasilicaPredicate::LoadAtLeast(threshold) => feature.effective_load() >= *threshold,
+            BasilicaPredicate::NameContains(fragment) => feature.name.contains(fragment),
+        }
+    }
+}
+
+impl TreeHost for Basilica {
+    type Space = BasilicaSpace;
+    type View = BasilicaView;
+    type Referent = FeatureId;
+    type Occurrence = OccurrenceId;
+    type Handle = SlotHandle;
+    type Predicate = BasilicaPredicate;
+
+    fn supports_view(&self, view: &Self::View) -> bool {
+        *view == BasilicaView::Assembly
+    }
+
+    fn node_at(
+        &self,
+        view: &Self::View,
+        address: &AbsoluteAddress<Self::Space>,
+    ) -> Option<HostNode<Self>> {
+        self.occurrences
+            .iter()
+            .find(|occurrence| occurrence.view == *view && occurrence.address == *address)
+            .map(|occurrence| self.projected_node(occurrence))
+    }
+
+    fn nodes<'a>(&'a self, view: &'a Self::View) -> impl Iterator<Item = HostNode<Self>> + 'a {
+        self.occurrences
+            .iter()
+            .filter(move |occurrence| occurrence.view == *view)
+            .map(|occurrence| self.projected_node(occurrence))
+    }
+
+    fn occurrences_of<'a>(
+        &'a self,
+        view: &'a Self::View,
+        referent: &'a Self::Referent,
+    ) -> impl Iterator<Item = HostNode<Self>> + 'a {
+        self.occurrences
+            .iter()
+            .filter(move |occurrence| occurrence.view == *view && occurrence.referent == *referent)
+            .map(|occurrence| self.projected_node(occurrence))
+    }
+
+    fn children<'a>(
+        &'a self,
+        view: &'a Self::View,
+        occurrence: &'a Self::Occurrence,
+    ) -> impl Iterator<Item = HostNode<Self>> + 'a {
+        self.edges
+            .iter()
+            .filter(move |edge| edge.kind == EdgeKind::Assembly && edge.from == *occurrence)
+            .filter_map(|edge| self.occurrence(edge.to))
+            .filter(move |child| child.view == *view)
+            .map(|child| self.projected_node(child))
+    }
+
+    fn parent(&self, view: &Self::View, occurrence: &Self::Occurrence) -> Option<HostNode<Self>> {
+        let edge = self
+            .edges
+            .iter()
+            .find(|edge| edge.kind == EdgeKind::Assembly && edge.to == *occurrence)?;
+        let parent = self.occurrence(edge.from)?;
+        (parent.view == *view).then(|| self.projected_node(parent))
+    }
+
+    fn matches(&self, node: &HostNode<Self>, predicate: &Self::Predicate) -> bool {
+        let Some(feature) = self.feature(*node.referent()) else {
             return false;
         };
         match predicate {
@@ -708,72 +795,16 @@ const fn edge(id: u64, from: u64, to: u64, kind: EdgeKind) -> Edge {
     }
 }
 
-fn charge(
-    stats: &mut QueryStats,
-    budget: TraversalBudget,
-    nodes: u32,
-    work: u32,
-    depth: u32,
-) -> Result<(), QueryError> {
-    stats.visited_nodes = stats.visited_nodes.saturating_add(nodes);
-    stats.work_units = stats.work_units.saturating_add(work);
-    stats.max_depth_reached = stats.max_depth_reached.max(depth);
-    if depth > budget.max_depth {
-        return Err(QueryError::BudgetExceeded(BudgetExceeded::new(
-            BudgetDimension::Depth,
-            budget.max_depth,
-            depth,
-        )));
-    }
-    if stats.visited_nodes > budget.max_nodes {
-        return Err(QueryError::BudgetExceeded(BudgetExceeded::new(
-            BudgetDimension::Nodes,
-            budget.max_nodes,
-            stats.visited_nodes,
-        )));
-    }
-    if stats.work_units > budget.max_work {
-        return Err(QueryError::BudgetExceeded(BudgetExceeded::new(
-            BudgetDimension::Work,
-            budget.max_work,
-            stats.work_units,
-        )));
-    }
-    Ok(())
-}
-
-fn charge_work(
-    stats: &mut QueryStats,
-    budget: TraversalBudget,
-    work: u32,
-) -> Result<(), QueryError> {
-    charge(stats, budget, 0, work, stats.max_depth_reached)
-}
-
 fn deduplicate(frontier: &mut Vec<BasilicaLocation>, identity: Deduplication) {
     match identity {
         Deduplication::None => {}
         Deduplication::Occurrence => {
-            let mut seen = Vec::new();
-            frontier.retain(|location| {
-                if seen.contains(location.occurrence()) {
-                    false
-                } else {
-                    seen.push(*location.occurrence());
-                    true
-                }
-            });
+            let mut seen = BTreeSet::new();
+            frontier.retain(|location| seen.insert(*location.occurrence()));
         }
         Deduplication::Referent => {
-            let mut seen = Vec::new();
-            frontier.retain(|location| {
-                if seen.contains(location.referent()) {
-                    false
-                } else {
-                    seen.push(*location.referent());
-                    true
-                }
-            });
+            let mut seen = BTreeSet::new();
+            frontier.retain(|location| seen.insert(*location.referent()));
         }
     }
 }
